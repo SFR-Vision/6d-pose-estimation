@@ -1,0 +1,27 @@
+name: pose6d
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  # CORE LIBRARIES (Conda handles binary conflicts for these)
+  - pytorch-cuda=12.1
+  - pytorch
+  - torchvision
+  - open3d
+  - matplotlib
+  - numpy
+  - scipy
+  - pyyaml
+  - tqdm
+  - scikit-learn
+  - jupyter
+  - ipykernel
+  
+  # PIP PACKAGES (For things best installed via pip)
+  - pip
+  - pip:
+    - ultralytics
+    - opencv-python

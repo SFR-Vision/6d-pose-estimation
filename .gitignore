@@ -1,0 +1,21 @@
+# Ignore Python cache
+__pycache__/
+*.pyc
+
+# Ignore Datasets (Too big for GitHub)
+datasets/
+
+# Ignore Weights (Too big)
+weights/
+*.pt
+*.pth
+
+# Ignore Run logs
+runs/
+
+# Ignore VS Code settings
+.vscode/
+.env
+
+# Ignore Jupyter checkpoints
+.ipynb_checkpoints/
