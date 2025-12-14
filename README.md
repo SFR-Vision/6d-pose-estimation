@@ -1,5 +1,7 @@
 # 6D Pose Estimation with RGB-D Fusion
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/SFR-Vision/6d-pose-estimation/blob/main/colab_setup.ipynb)
+
 Real-time 6D object pose estimation using YOLO detection and RGB-D deep learning on the LineMOD dataset.
 
 ## Features
