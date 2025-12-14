@@ -13,11 +13,11 @@ scripts/
 │
 ├── training/           # Model training scripts
 │   ├── train_yolo.py          # Train YOLO object detector
-│   ├── main_train.py          # Train RGB-only pose model
+│   ├── train_rgb.py           # Train RGB-only pose model
 │   └── train_rgbd.py          # Train RGB-D pose model
 │
 ├── inference/          # Inference and evaluation scripts
-│   ├── main_inference.py      # Run inference with RGB model
+│   ├── inference_rgb.py       # Run inference with RGB model
 │   └── inference_rgbd.py      # Run inference with RGB-D model
 │
 └── visualization/      # Result visualization scripts
@@ -48,7 +48,7 @@ python scripts/setup/setup_weights.py
 python scripts/training/train_yolo.py
 
 # Train RGB pose model
-python scripts/training/main_train.py
+python scripts/training/train_rgb.py
 
 # Train RGB-D pose model
 python scripts/training/train_rgbd.py
@@ -57,7 +57,7 @@ python scripts/training/train_rgbd.py
 ### Inference
 ```bash
 # RGB inference
-python scripts/inference/main_inference.py
+python scripts/inference/inference_rgb.py
 
 # RGB-D inference
 python scripts/inference/inference_rgbd.py
