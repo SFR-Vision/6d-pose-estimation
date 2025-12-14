@@ -18,7 +18,7 @@ DATA_ROOT = os.path.join("datasets", "Linemod_preprocessed", "data")
 MODEL_MESH_DIR = os.path.join("datasets", "Linemod_preprocessed", "models")
 SAVE_DIR = "weights"
 
-EPOCHS = 100            # Increased for better convergence
+EPOCHS = 10            # Increased for better convergence
 
 BATCH_SIZE = 16
 LEARNING_RATE = 1e-4    # Higher initial LR (scheduler will reduce it)

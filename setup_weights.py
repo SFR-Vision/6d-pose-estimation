@@ -9,7 +9,7 @@ import zipfile
 
 # ================= CONFIGURATION =================
 # Google Drive File ID for pre-trained weights
-PRETRAINED_WEIGHTS_ID = 'YOUR_FILE_ID_HERE'  # Update after uploading to Drive
+PRETRAINED_WEIGHTS_ID = '1huMuHCqqlgiJG0330An67qRepFrCZIMr'  # Update after uploading to Drive
 # =================================================
 
 def install(package):
