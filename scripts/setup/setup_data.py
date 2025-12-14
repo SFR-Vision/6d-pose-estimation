@@ -3,12 +3,17 @@ import sys
 import subprocess
 import zipfile
 
+# Add project root to path
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.insert(0, PROJECT_ROOT)
+os.chdir(PROJECT_ROOT)
+
 # ================= CONFIGURATION =================
 # Google Drive File ID
 FILE_ID = '1kxNSIQAs_KyOF0EM0OEWUbQHZNiS-mam'
 
 # Where the data should live
-DATASETS_DIR = "datasets"
+DATASETS_DIR = os.path.join(PROJECT_ROOT, "datasets")
 # =================================================
 
 def install(package):

@@ -7,6 +7,11 @@ import sys
 import subprocess
 import zipfile
 
+# Add project root to path
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.insert(0, PROJECT_ROOT)
+os.chdir(PROJECT_ROOT)
+
 # ================= CONFIGURATION =================
 # Google Drive File ID for pre-trained weights
 PRETRAINED_WEIGHTS_ID = '1huMuHCqqlgiJG0330An67qRepFrCZIMr'  # Update after uploading to Drive

@@ -1,14 +1,21 @@
 import os
+import sys
+
+# Add project root to path
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.insert(0, PROJECT_ROOT)
+os.chdir(PROJECT_ROOT)
+
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE" # Fix for macOS/KMP issue
 
 from ultralytics import YOLO
 import torch
 
 # ================= CONFIGURATION =================
-DATA_YAML = os.path.join("datasets", "yolo_ready", "dataset.yaml")
+DATA_YAML = os.path.join(PROJECT_ROOT, "datasets", "yolo_ready", "dataset.yaml")
 
 # Checkpoint Paths
-PROJECT_DIR = "runs/detect"
+PROJECT_DIR = os.path.join(PROJECT_ROOT, "runs", "detect")
 EXP_NAME = "linemod_yolo"
 LAST_CKPT = os.path.join(PROJECT_DIR, EXP_NAME, "weights", "last.pt")
 

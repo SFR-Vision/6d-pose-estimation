@@ -9,6 +9,11 @@ import shutil
 import cv2
 import sys
 
+# Add project root to path
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.insert(0, PROJECT_ROOT)
+os.chdir(PROJECT_ROOT)
+
 try:
     from tqdm import tqdm
 except ImportError:
@@ -17,8 +22,8 @@ except ImportError:
     from tqdm import tqdm
 
 
-SOURCE_ROOT = os.path.join("datasets", "Linemod_preprocessed", "data")
-DEST_ROOT = os.path.join("datasets", "yolo_ready")
+SOURCE_ROOT = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "data")
+DEST_ROOT = os.path.join(PROJECT_ROOT, "datasets", "yolo_ready")
 
 
 def convert_bbox_to_yolo(size, box):
