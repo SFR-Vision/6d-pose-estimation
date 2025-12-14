@@ -36,7 +36,22 @@ pip install -r requirements.txt
 # Place in: datasets/Linemod_preprocessed/
 ```
 
-### Google Colab
+### Google Colab (Recommended)
+
+**Option 1: Automated Pipeline (Easiest)**
+
+1. Open `colab_setup.ipynb` in Google Colab
+2. Click **Runtime → Run All**
+3. Done! Everything runs automatically (dataset download, training, visualization)
+
+**Option 2: Use Pre-trained Weights (Fastest)**
+
+1. Open `colab_setup.ipynb` in Google Colab
+2. Set `USE_PRETRAINED = True` in Step 3.5
+3. Click **Runtime → Run All**
+4. Skips ~3-4 hours of training, uses pre-trained models
+
+**Option 3: Manual Setup**
 
 ```python
 # Mount Google Drive (store dataset and models here)
