@@ -22,7 +22,7 @@ scripts/
 │
 └── visualization/      # Result visualization scripts
     ├── visualize_yolo.py      # Visualize YOLO detection results
-    ├── visualize_final.py     # Visualize RGB model results
+    ├── visualize_rgb.py       # Visualize RGB model results
     ├── visualize_rgbd.py      # Visualize RGB-D model with GT comparison
     ├── visualize_pose.py      # Generic pose visualization
     └── visualize_points.py    # 3D point cloud visualization
@@ -69,7 +69,7 @@ python scripts/inference/inference_rgbd.py
 python scripts/visualization/visualize_yolo.py
 
 # Visualize RGB model
-python scripts/visualization/visualize_final.py
+python scripts/visualization/visualize_rgb.py
 
 # Visualize RGB-D with ground truth
 python scripts/visualization/visualize_rgbd.py
