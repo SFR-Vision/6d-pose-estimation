@@ -90,8 +90,8 @@ class LineMODDatasetRGBD(Dataset):
             noise_rot = R.from_euler('xyz', noise_angles).as_matrix()
             gt_rot_mat = noise_rot @ gt_rot_mat
             
-            # Translation noise
-            t_noise = np.random.uniform(-20, 20, 3)
+            # Translation noise (in mm, same scale as gt_trans)
+            t_noise = np.random.uniform(-20, 20, 3)  # ±20mm
             gt_trans = gt_trans + t_noise
             
             # Box jitter
@@ -134,16 +134,17 @@ class LineMODDatasetRGBD(Dataset):
         rgb_crop = cv2.resize(rgb_crop, (self.img_size, self.img_size))
         depth_crop = cv2.resize(depth_crop, (self.img_size, self.img_size))
         
-        # 6. Normalize depth first (mm -> meters)
-        depth_crop = depth_crop.astype(np.float32) / 1000.0  # mm to meters
+        # 6. Convert depth to float32 for processing
+        depth_crop = depth_crop.astype(np.float32)
         
-        # 7. Apply bilateral filter to depth for noise reduction (only during training)
-        if self.augment_pose and depth_crop.max() > 0:
-            # bilateralFilter requires float32, which we now have
-            depth_crop = cv2.bilateralFilter(depth_crop, 5, 0.1, 0.1)
+        # 7. Apply bilateral filter for noise reduction (on raw mm values)
+        if depth_crop.max() > 0:
+            # Filter works better on mm scale with larger sigma values
+            depth_crop = cv2.bilateralFilter(depth_crop, 5, 75, 75)
         
-        # 8. Normalize to [0, 1] range
-        depth_crop = np.clip(depth_crop / 2.0, 0, 1)  # Assume max 2m depth
+        # 8. Normalize depth: mm -> meters, then to [0, 1] range
+        depth_crop = depth_crop / 1000.0  # mm to meters
+        depth_crop = np.clip(depth_crop / 1.5, 0, 1)  # LineMOD max ~1.5m depth
         depth_crop = depth_crop[..., np.newaxis]  # Add channel dimension
         
         # 8. Prepare labels
