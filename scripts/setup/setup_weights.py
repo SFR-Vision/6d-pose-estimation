@@ -64,14 +64,42 @@ def download_pretrained_weights():
         
         print("📦 Extracting weights...")
         with zipfile.ZipFile(output_zip, 'r') as zip_ref:
+            # List contents for debugging
+            file_list = zip_ref.namelist()
+            print(f"   Zip contains {len(file_list)} files")
+            
+            # Check if there's a parent directory
+            first_file = file_list[0]
+            if '/' in first_file:
+                parent_dir = first_file.split('/')[0]
+                print(f"   Detected parent directory: {parent_dir}")
+            
             zip_ref.extractall(".")
+        
+        # Handle different zip structures
+        import shutil
+        
+        # Check if files are in a parent directory
+        possible_parents = ["pretrained_weights", "weights", "Pose6D"]
+        for parent in possible_parents:
+            if os.path.exists(parent):
+                print(f"   Moving files from {parent}/ to root...")
+                # Move weights directories
+                for item in ["weights_rgb", "weights_hybrid", "yolo_weights", "runs"]:
+                    src = os.path.join(parent, item)
+                    if os.path.exists(src):
+                        if os.path.exists(item):
+                            shutil.rmtree(item)
+                        shutil.move(src, item)
+                # Remove parent directory
+                shutil.rmtree(parent)
+                break
         
         # Move YOLO weights to correct location
         os.makedirs("runs/detect/linemod_yolo/weights", exist_ok=True)
         if os.path.exists("yolo_weights/best.pt"):
-            import shutil
             shutil.move("yolo_weights/best.pt", "runs/detect/linemod_yolo/weights/best.pt")
-            if os.path.exists("yolo_weights"):
+            if os.path.exists("yolo_weights") and not os.listdir("yolo_weights"):
                 os.rmdir("yolo_weights")
         
         os.remove(output_zip)
