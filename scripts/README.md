@@ -8,12 +8,13 @@ This directory contains all executable scripts for the 6D Pose Estimation projec
 scripts/
 ├── setup/              # Dataset and environment setup scripts
 │   ├── setup_data.py          # Download LineMOD dataset from Google Drive
-│   ├── setup_weights.py       # Download pre-trained model weights
+│   ├── setup_weights.py       # Download pre-trained model weights (RGB + Hybrid + YOLO)
 │   └── prepare_yolo.py        # Convert dataset to YOLO format
 │
 ├── training/           # Model training scripts
 │   ├── train_yolo.py          # Train YOLO object detector
 │   ├── train_rgb.py           # Train RGB-only pose model
+│   ├── train_hybrid.py        # Train Hybrid model (RGB + Geometric constraints)
 │   └── train_rgbd.py          # Train RGB-D pose model
 │
 ├── inference/          # Inference and evaluation scripts
@@ -23,7 +24,10 @@ scripts/
 └── visualization/      # Result visualization scripts
     ├── visualize_yolo.py      # Visualize YOLO detection results
     ├── visualize_rgb.py       # Visualize RGB model results
-    └── visualize_rgbd.py      # Visualize RGB-D model with GT comparison
+    ├── visualize_hybrid.py    # Visualize Hybrid model results
+    ├── visualize_rgbd.py      # Visualize RGB-D model with GT comparison
+    ├── compare_rgb_vs_rgbd.py      # Side-by-side RGB vs RGB-D comparison
+    └── compare_rgb_vs_hybrid.py    # Side-by-side RGB vs Hybrid comparison
 ```
 
 ## Usage
@@ -48,7 +52,10 @@ python scripts/training/train_yolo.py
 # Train RGB pose model
 python scripts/training/train_rgb.py
 
-# Train RGB-D pose model
+# Train Hybrid model (recommended - 5% better than RGB)
+python scripts/training/train_hybrid.py
+
+# [Optional] Train RGB-D pose model
 python scripts/training/train_rgbd.py
 ```
 
@@ -69,8 +76,17 @@ python scripts/visualization/visualize_yolo.py
 # Visualize RGB model
 python scripts/visualization/visualize_rgb.py
 
+# Visualize Hybrid model
+python scripts/visualization/visualize_hybrid.py
+
 # Visualize RGB-D with ground truth
 python scripts/visualization/visualize_rgbd.py
+
+# Compare RGB vs Hybrid (recommended - shows improvement)
+python scripts/visualization/compare_rgb_vs_hybrid.py
+
+# Compare RGB vs RGB-D
+python scripts/visualization/compare_rgb_vs_rgbd.py
 ```
 
 ## Notes

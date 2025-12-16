@@ -19,14 +19,14 @@ import sys
 
 # Custom Modules
 try:
-    from models.pose_net import PoseNet
+    from models.pose_net_rgb import PoseNet
 except ImportError:
     print("❌ Error: Could not import PoseNet.")
     sys.exit(1)
 
 # ================= CONFIGURATION =================
 YOLO_PATH = os.path.join("runs", "detect", "linemod_yolo", "weights", "best.pt")
-POSE_PATH = os.path.join("weights", "best_pose_model.pth")
+POSE_PATH = os.path.join("weights_rgb", "best_pose_model.pth")
 TEST_IMG_DIR = os.path.join("datasets", "yolo_ready", "images", "test")
 ORIG_DATA_DIR = os.path.join("datasets", "Linemod_preprocessed", "data")
 MESH_DIR = os.path.join("datasets", "Linemod_preprocessed", "models")

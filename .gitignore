@@ -17,5 +17,8 @@ runs/
 .vscode/
 .env
 
+# Ignore AI agent instructions (keep local)
+.github/copilot-instructions.md
+
 # Ignore Jupyter checkpoints
 .ipynb_checkpoints/

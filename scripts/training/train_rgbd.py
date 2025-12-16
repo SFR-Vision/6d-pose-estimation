@@ -22,7 +22,7 @@ DATA_ROOT = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "data
 MODEL_MESH_DIR = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "models")
 SAVE_DIR = os.path.join(PROJECT_ROOT, "weights_rgbd")
 
-EPOCHS = 150
+EPOCHS = 50  # Start with 50 epochs for experimentation
 BATCH_SIZE = 16
 LEARNING_RATE = 1e-4
 WEIGHT_DECAY = 1e-4
@@ -55,8 +55,8 @@ def train():
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
-    train_set = LineMODDatasetRGBD(DATA_ROOT, mode='train', transform=train_transform, augment_pose=True)
-    val_set = LineMODDatasetRGBD(DATA_ROOT, mode='val', transform=val_transform, augment_pose=False)
+    train_set = LineMODDatasetRGBD(DATA_ROOT, mode='train', transform=train_transform, augment_bbox=True)
+    val_set = LineMODDatasetRGBD(DATA_ROOT, mode='val', transform=val_transform, augment_bbox=False)
     
     num_workers = 4
     train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, 
@@ -74,7 +74,8 @@ def train():
         optimizer, mode='min', factor=0.5, patience=10, min_lr=1e-7
     )
     
-    criterion = ADDLoss(MODEL_MESH_DIR, device, rot_weight=0.0, trans_weight=0.0)
+    # Using weighted loss: 1.0 for rotation, 1.0 for translation (experimental)
+    criterion = ADDLoss(MODEL_MESH_DIR, device, rot_weight=1.0, trans_weight=1.0)
 
     # 3. Auto-resume
     start_epoch = 0

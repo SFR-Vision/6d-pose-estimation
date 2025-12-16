@@ -6,8 +6,8 @@ import cv2
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-class LineMODDatasetRGBD(Dataset):
-    """LineMOD Dataset with RGB-D support"""
+class LineMODDatasetHybrid(Dataset):
+    """LineMOD Dataset for Hybrid Model (RGB-only input + Camera Intrinsics for geometric X,Y)"""
     def __init__(self, root_dir, mode='train', transform=None, img_size=224, augment_bbox=True):
         self.root_dir = root_dir
         self.mode = mode
@@ -21,18 +21,21 @@ class LineMODDatasetRGBD(Dataset):
 
         obj_folders = [f for f in sorted(os.listdir(root_dir)) if f.isdigit()]
         
-        print(f"[{mode.upper()}] Processing {len(obj_folders)} objects with DEPTH...")
+        print(f"[{mode.upper()}] Processing {len(obj_folders)} objects with RGB + CAMERA INFO (no depth input)...")
         for obj_folder in obj_folders:
             base_path = os.path.join(root_dir, obj_folder)
             gt_path = os.path.join(base_path, 'gt.yml')
+            info_path = os.path.join(base_path, 'info.yml')
             rgb_path = os.path.join(base_path, 'rgb')
-            depth_path = os.path.join(base_path, 'depth')
             
-            if not os.path.exists(gt_path) or not os.path.exists(depth_path):
+            if not os.path.exists(gt_path) or not os.path.exists(info_path):
                 continue
                 
             with open(gt_path, 'r') as f:
                 gts = yaml.safe_load(f)
+            
+            with open(info_path, 'r') as f:
+                infos = yaml.safe_load(f)
             
             images = sorted([img for img in os.listdir(rgb_path) if img.endswith(".png")])
             
@@ -48,19 +51,19 @@ class LineMODDatasetRGBD(Dataset):
                 if split_name != mode:
                     continue
 
-                if frame_id in gts:
+                if frame_id in gts and frame_id in infos:
                     for anno in gts[frame_id]:
                         if str(int(anno['obj_id'])).zfill(2) == obj_folder:
                             self.all_data.append({
                                 'img_path': os.path.join(rgb_path, img_name),
-                                'depth_path': os.path.join(depth_path, img_name),
                                 'obj_id': int(obj_folder) - 1,
                                 'bbox': anno['obj_bb'],
                                 'cam_R_m2c': anno['cam_R_m2c'],
-                                'cam_t_m2c': anno['cam_t_m2c']
+                                'cam_t_m2c': anno['cam_t_m2c'],
+                                'cam_K': infos[frame_id]['cam_K']  # Camera intrinsics
                             })
 
-        print(f"[{mode.upper()}] Loaded {len(self.all_data)} RGB-D samples")
+        print(f"[{mode.upper()}] Loaded {len(self.all_data)} Hybrid samples")
 
     def __len__(self):
         return len(self.all_data)
@@ -68,16 +71,11 @@ class LineMODDatasetRGBD(Dataset):
     def __getitem__(self, idx):
         item = self.all_data[idx]
         
-        # 1. Load RGB Image
+        # 1. Load RGB Image (ONLY - no depth input for hybrid model)
         rgb_image = cv2.imread(item['img_path'])
         rgb_image = cv2.cvtColor(rgb_image, cv2.COLOR_BGR2RGB)
         
-        # 2. Load Depth Image
-        depth_image = cv2.imread(item['depth_path'], cv2.IMREAD_UNCHANGED)
-        if depth_image is None:
-            depth_image = np.zeros((rgb_image.shape[0], rgb_image.shape[1]), dtype=np.uint16)
-        
-        # 3. Ground Truth
+        # 2. Ground Truth
         gt_rot_mat = np.array(item['cam_R_m2c']).reshape(3, 3)
         gt_trans = np.array(item['cam_t_m2c'])
         
@@ -112,43 +110,29 @@ class LineMODDatasetRGBD(Dataset):
         if pad_l > 0 or pad_t > 0 or pad_r > 0 or pad_b > 0:
             rgb_image = cv2.copyMakeBorder(rgb_image, pad_t, pad_b, pad_l, pad_r, 
                                            cv2.BORDER_CONSTANT, value=0)
-            depth_image = cv2.copyMakeBorder(depth_image, pad_t, pad_b, pad_l, pad_r,
-                                            cv2.BORDER_CONSTANT, value=0)
             x1 += pad_l
             y1 += pad_t
             
-        # Crop
+        # Crop and resize RGB only
         rgb_crop = rgb_image[y1:y1+int(size), x1:x1+int(size)]
-        depth_crop = depth_image[y1:y1+int(size), x1:x1+int(size)]
-        
-        # Resize
         rgb_crop = cv2.resize(rgb_crop, (self.img_size, self.img_size))
-        depth_crop = cv2.resize(depth_crop, (self.img_size, self.img_size))
         
-        # 6. Convert depth to float32 for processing
-        depth_crop = depth_crop.astype(np.float32)
-        
-        # 7. Apply bilateral filter for noise reduction (on raw mm values)
-        if depth_crop.max() > 0:
-            # Filter works better on mm scale with larger sigma values
-            depth_crop = cv2.bilateralFilter(depth_crop, 5, 75, 75)
-        
-        # 8. Normalize depth: mm -> meters, then to [0, 1] range
-        depth_crop = depth_crop / 1000.0  # mm to meters
-        depth_crop = np.clip(depth_crop / 1.5, 0, 1)  # LineMOD max ~1.5m depth
-        depth_crop = depth_crop[..., np.newaxis]  # Add channel dimension
-        
-        # 8. Prepare labels
+        # 6. Prepare labels
         translation = torch.tensor(gt_trans, dtype=torch.float32) / 1000.0
         r = R.from_matrix(gt_rot_mat)
         quaternion = torch.tensor(r.as_quat(), dtype=torch.float32)
         obj_id = torch.tensor(item['obj_id'], dtype=torch.long)
         
-        # 9. Apply transforms
+        # 7. Camera intrinsics and bbox center for pinhole computation
+        cam_K = np.array(item['cam_K']).reshape(3, 3).astype(np.float32)
+        camera_matrix = torch.from_numpy(cam_K)
+        
+        # Bbox center in ORIGINAL image coordinates (before crop)
+        x, y, w, h = item['bbox']
+        bbox_center = torch.tensor([x + w/2, y + h/2], dtype=torch.float32)
+        
+        # 8. Apply transforms
         if self.transform:
             rgb_crop = self.transform(rgb_crop)
         
-        # Depth transform (to tensor)
-        depth_crop = torch.from_numpy(depth_crop).permute(2, 0, 1).float()
-        
-        return rgb_crop, depth_crop, quaternion, translation, obj_id
+        return rgb_crop, quaternion, translation, obj_id, bbox_center, camera_matrix

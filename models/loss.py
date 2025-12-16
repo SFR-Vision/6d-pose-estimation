@@ -112,7 +112,7 @@ class ADDLoss(nn.Module):
             rot_dist = torch.norm(pred_points_rot - gt_points_rot, dim=1, p=2)
             total_rot_loss += torch.mean(rot_dist)
             
-            # 5. Translation Loss: Direct L1 distance
+            # 5. Translation Loss: Direct L2 distance
             trans_dist = torch.norm(pred_t[i] - gt_t[i], p=2)
             total_trans_loss += trans_dist
 
@@ -126,9 +126,9 @@ class ADDLoss(nn.Module):
         return combined_loss
 
     def quat_to_mat(self, q):
-        # Convert quaternion [w, x, y, z] to 3x3 rotation matrix
+        # Convert quaternion [x, y, z, w] (scipy format) to 3x3 rotation matrix
         # Based on standard formula
-        w, x, y, z = q[:, 0], q[:, 1], q[:, 2], q[:, 3]
+        x, y, z, w = q[:, 0], q[:, 1], q[:, 2], q[:, 3]
         
         x2, y2, z2 = x*x, y*y, z*z
         xy, xz, yz = x*y, x*z, y*z

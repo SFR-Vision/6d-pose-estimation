@@ -15,16 +15,16 @@ from tqdm import tqdm
 import time
 
 # Custom Modules
-from data.dataset import LineMODDataset
-from models.pose_net import PoseNet
+from data.dataset_rgb import LineMODDataset
+from models.pose_net_rgb import PoseNet
 from models.loss import ADDLoss
 
 # ================= CONFIGURATION =================
 DATA_ROOT = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "data")
 MODEL_MESH_DIR = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "models")
-SAVE_DIR = os.path.join(PROJECT_ROOT, "weights")
+SAVE_DIR = os.path.join(PROJECT_ROOT, "weights_rgb")
 
-EPOCHS = 10            # Increased for better convergence
+EPOCHS = 50            # Increased for better convergence
 
 BATCH_SIZE = 16
 LEARNING_RATE = 1e-4    # Higher initial LR (scheduler will reduce it)
@@ -61,9 +61,9 @@ def train():
     ])
 
     print("   Loading training set...")
-    train_set = LineMODDataset(DATA_ROOT, mode='train', transform=train_transform, augment_pose=True)
+    train_set = LineMODDataset(DATA_ROOT, mode='train', transform=train_transform, augment_bbox=True)
     print("   Loading validation set...")
-    val_set   = LineMODDataset(DATA_ROOT, mode='val', transform=val_transform, augment_pose=False)
+    val_set   = LineMODDataset(DATA_ROOT, mode='val', transform=val_transform, augment_bbox=False)
     
     print("   Creating data loaders...")
     # Use 4 workers for faster data loading (safe number for Windows)

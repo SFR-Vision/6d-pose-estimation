@@ -17,14 +17,14 @@ from scipy.spatial.transform import Rotation as R
 
 # Custom Modules
 try:
-    from models.pose_net import PoseNet
+    from models.pose_net_rgb import PoseNet
 except ImportError:
     print("❌ Error: Could not import PoseNet.")
     sys.exit(1)
 
 # ================= CONFIGURATION =================
 YOLO_PATH = os.path.join("runs", "detect", "linemod_yolo", "weights", "best.pt")
-POSE_PATH = os.path.join("weights", "best_pose_model.pth")
+POSE_PATH = os.path.join("weights_rgb", "best_pose_model.pth")
 MESH_DIR = os.path.join("datasets", "Linemod_preprocessed", "models")
 
 # Standard Camera Matrix (approximate for general use)

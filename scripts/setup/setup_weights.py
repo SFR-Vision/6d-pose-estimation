@@ -14,7 +14,7 @@ os.chdir(PROJECT_ROOT)
 
 # ================= CONFIGURATION =================
 # Google Drive File ID for pre-trained weights
-PRETRAINED_WEIGHTS_ID = '1huMuHCqqlgiJG0330An67qRepFrCZIMr'  # Update after uploading to Drive
+PRETRAINED_WEIGHTS_ID = '1Nx9w9tjLmpsbmzWogwUIB3QpJhUGW2D7'  # Update after uploading to Drive
 # =================================================
 
 def install(package):
@@ -27,14 +27,22 @@ def download_pretrained_weights():
     try:
         import gdown
     except ImportError:
+        print("📦 Installing gdown for Google Drive downloads...")
         install("gdown")
         import gdown
     
     # Check if weights already exist
-    if (os.path.exists("weights/best_pose_model.pth") and 
-        os.path.exists("weights_rgbd/best_pose_model_rgbd.pth") and
-        os.path.exists("yolo_weights/best.pt")):
+    weights_exist = (
+        os.path.exists("weights_rgb/best_pose_model.pth") and 
+        os.path.exists("weights_hybrid/best_pose_model.pth") and
+        os.path.exists("runs/detect/linemod_yolo/weights/best.pt")
+    )
+    
+    if weights_exist:
         print("✅ Pre-trained weights already exist!")
+        print("   - RGB model: weights_rgb/best_pose_model.pth")
+        print("   - Hybrid model: weights_hybrid/best_pose_model.pth")
+        print("   - YOLO detector: runs/detect/linemod_yolo/weights/best.pt")
         return True
     
     print("⬇️  Downloading pre-trained weights from Google Drive...")
@@ -43,28 +51,50 @@ def download_pretrained_weights():
     output_zip = "pretrained_weights.zip"
     
     try:
-        gdown.download(url, output_zip, quiet=False)
+        # Download with fuzzy matching (more reliable)
+        gdown.download(url, output_zip, quiet=False, fuzzy=True)
         
-        if os.path.exists(output_zip):
-            print("📦 Extracting weights...")
-            with zipfile.ZipFile(output_zip, 'r') as zip_ref:
-                zip_ref.extractall(".")
-            
-            # Move YOLO weights to correct location
-            os.makedirs("runs/detect/linemod_yolo/weights", exist_ok=True)
-            if os.path.exists("yolo_weights/best.pt"):
-                os.rename("yolo_weights/best.pt", "runs/detect/linemod_yolo/weights/best.pt")
-                os.rmdir("yolo_weights")
-            
-            os.remove(output_zip)
-            print("✅ Pre-trained weights loaded successfully!")
-            print("   - RGB model: weights/best_pose_model.pth")
-            print("   - RGB-D model: weights_rgbd/best_pose_model_rgbd.pth")
-            print("   - YOLO detector: runs/detect/linemod_yolo/weights/best.pt")
-            return True
-        else:
-            print("❌ Download failed!")
+        if not os.path.exists(output_zip):
+            print("❌ Download failed - file not found!")
+            print("💡 Please check the Google Drive link is publicly accessible")
             return False
+        
+        file_size = os.path.getsize(output_zip) / (1024 * 1024)  # MB
+        print(f"✅ Downloaded {file_size:.1f} MB")
+        
+        print("📦 Extracting weights...")
+        with zipfile.ZipFile(output_zip, 'r') as zip_ref:
+            zip_ref.extractall(".")
+        
+        # Move YOLO weights to correct location
+        os.makedirs("runs/detect/linemod_yolo/weights", exist_ok=True)
+        if os.path.exists("yolo_weights/best.pt"):
+            import shutil
+            shutil.move("yolo_weights/best.pt", "runs/detect/linemod_yolo/weights/best.pt")
+            if os.path.exists("yolo_weights"):
+                os.rmdir("yolo_weights")
+        
+        os.remove(output_zip)
+        print("✅ Pre-trained weights loaded successfully!")
+        print("   - RGB model: weights_rgb/best_pose_model.pth")
+        print("   - Hybrid model: weights_hybrid/best_pose_model.pth")
+        print("   - YOLO detector: runs/detect/linemod_yolo/weights/best.pt")
+        
+        # Verify all files exist
+        missing = []
+        if not os.path.exists("weights_rgb/best_pose_model.pth"):
+            missing.append("RGB weights")
+        if not os.path.exists("weights_hybrid/best_pose_model.pth"):
+            missing.append("Hybrid weights")
+        if not os.path.exists("runs/detect/linemod_yolo/weights/best.pt"):
+            missing.append("YOLO weights")
+        
+        if missing:
+            print(f"⚠️  Warning: Missing files: {', '.join(missing)}")
+            print("💡 Zip file may be incomplete or have wrong structure")
+            return False
+        
+        return True
             
     except Exception as e:
         print(f"❌ Error downloading weights: {e}")

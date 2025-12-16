@@ -16,12 +16,12 @@ from torchvision import transforms
 from ultralytics import YOLO
 from scipy.spatial.transform import Rotation as R
 
-from models.pose_net import PoseNet
+from models.pose_net_rgb import PoseNet
 from models.pose_net_rgbd import PoseNetRGBD
 
 # ================= CONFIGURATION =================
 YOLO_PATH = os.path.join(PROJECT_ROOT, "runs", "detect", "linemod_yolo", "weights", "best.pt")
-RGB_POSE_PATH = os.path.join(PROJECT_ROOT, "weights", "best_pose_model.pth")
+RGB_POSE_PATH = os.path.join(PROJECT_ROOT, "weights_rgb", "best_pose_model.pth")
 RGBD_POSE_PATH = os.path.join(PROJECT_ROOT, "weights_rgbd", "best_pose_model_rgbd.pth")
 TEST_IMG_DIR = os.path.join(PROJECT_ROOT, "datasets", "yolo_ready", "images", "test")
 ORIG_DATA_DIR = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "data")

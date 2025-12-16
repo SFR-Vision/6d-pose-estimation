@@ -7,12 +7,12 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 class LineMODDataset(Dataset):
-    def __init__(self, root_dir, mode='train', transform=None, img_size=224, augment_pose=True):
+    def __init__(self, root_dir, mode='train', transform=None, img_size=224, augment_bbox=True):
         self.root_dir = root_dir
         self.mode = mode
         self.transform = transform
         self.img_size = img_size
-        self.augment_pose = augment_pose and (mode == 'train')  # Only augment during training
+        self.augment_bbox = augment_bbox and (mode == 'train')  # Only augment during training
         self.all_data = []
         
         # Check if path exists
@@ -78,19 +78,8 @@ class LineMODDataset(Dataset):
         x, y, w, h = item['bbox']
 
         # --- AUGMENTATION START ---
-        if self.augment_pose:
-            # A. Rotation Noise (±5 degrees)
-            noise_angles = np.random.uniform(-5, 5, 3) * np.pi / 180.0
-            noise_rot = R.from_euler('xyz', noise_angles).as_matrix()
-            gt_rot_mat = noise_rot @ gt_rot_mat # Apply rotation
-            
-            # B. Translation Noise (±20mm / 2cm)
-            t_noise = np.random.uniform(-20, 20, 3)
-            gt_trans = gt_trans + t_noise
-            
-            # C. Box Jitter (Simulate YOLO imperfections) - INCREASED
-            # Shift center by ±15% of box size (more realistic)
-            # Scale by ±20% (YOLO can be quite off)
+        if self.augment_bbox:
+            # Box Jitter (Simulate YOLO imperfections)
             jitter_x = int(np.random.uniform(-0.15, 0.15) * w)
             jitter_y = int(np.random.uniform(-0.15, 0.15) * h)
             scale_w = int(np.random.uniform(-0.2, 0.2) * w)
@@ -128,10 +117,9 @@ class LineMODDataset(Dataset):
         # Translation: mm -> meters
         translation = torch.tensor(gt_trans / 1000.0, dtype=torch.float32)
         
-        # Rotation: Fix Scipy Order [x, y, z, w] -> PyTorch Order [w, x, y, z]
+        # Rotation: Use scipy default order [x, y, z, w]
         r = R.from_matrix(gt_rot_mat)
-        q = r.as_quat() # returns x,y,z,w
-        quaternion = torch.tensor([q[3], q[0], q[1], q[2]], dtype=torch.float32) # w,x,y,z
+        quaternion = torch.tensor(r.as_quat(), dtype=torch.float32)  # [x, y, z, w]
 
         # Class ID
         obj_id = torch.tensor(item['obj_id'], dtype=torch.long)

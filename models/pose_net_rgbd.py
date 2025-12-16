@@ -17,15 +17,15 @@ class PoseNetRGBD(nn.Module):
         resnet_rgb = models.resnet50(weights=weights)
         self.rgb_backbone = nn.Sequential(*list(resnet_rgb.children())[:-1])
         
-        # 2. Depth Backbone: ResNet18 (lighter for depth)
-        resnet_depth = models.resnet18(weights=None)  # No pretrained weights for depth
+        # 2. Depth Backbone: ResNet50 (upgraded for better accuracy)
+        resnet_depth = models.resnet50(weights=None)  # No pretrained weights for depth
         # Modify first conv to accept 1-channel depth input
         resnet_depth.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.depth_backbone = nn.Sequential(*list(resnet_depth.children())[:-1])
         
         # 3. Fusion Layer (Simple)
         rgb_dim = 2048  # ResNet50
-        depth_dim = 512  # ResNet18
+        depth_dim = 2048  # ResNet50 (upgraded from ResNet18)
         fused_dim = 2048
         
         self.fusion = nn.Sequential(
