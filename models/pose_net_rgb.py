@@ -1,28 +1,27 @@
+"""RGB-only pose estimation network using ResNet50 backbone."""
+
 import torch
 import torch.nn as nn
 import torchvision.models as models
 
-class PoseNet(nn.Module):
+
+class PoseNetRGB(nn.Module):
+    """
+    Pose estimation model using RGB input.
+    Predicts rotation (quaternion) and translation (x, y, z).
+    """
+    
     def __init__(self, pretrained=True):
-        super(PoseNet, self).__init__()
+        super(PoseNetRGB, self).__init__()
         
-        # 1. Backbone: ResNet50 (Per PDF Instructions)
-        print("🔧 Initializing ResNet50 Backbone...")
-        # Load weights
+        # Backbone: ResNet50
         weights = models.ResNet50_Weights.DEFAULT if pretrained else None
         resnet = models.resnet50(weights=weights)
-        
-        # Remove the last fully connected layer (fc) and pooling layer
-        # We want the spatial features or the flattened vector before classification
         self.backbone = nn.Sequential(*list(resnet.children())[:-1])
         
-        # 2. Heads (Deeper & Wider for Better Precision)
-        # ResNet50 output is 2048 dim (ResNet34 was 512)
-        input_dim = 2048 
-        
-        # Rotation Head (Output: 4 values for Quaternion) - EXPANDED
+        # Rotation head (outputs 4-dim quaternion)
         self.rot_head = nn.Sequential(
-            nn.Linear(input_dim, 2048),
+            nn.Linear(2048, 2048),
             nn.BatchNorm1d(2048),
             nn.ReLU(),
             nn.Dropout(0.3),
@@ -32,12 +31,12 @@ class PoseNet(nn.Module):
             nn.Dropout(0.2),
             nn.Linear(1024, 512),
             nn.ReLU(),
-            nn.Linear(512, 4)  # Quaternion (w, x, y, z)
+            nn.Linear(512, 4)
         )
         
-        # Translation Head (Output: 3 values for x, y, z) - EXPANDED
+        # Translation head (outputs x, y, z in meters)
         self.trans_head = nn.Sequential(
-            nn.Linear(input_dim, 2048),
+            nn.Linear(2048, 2048),
             nn.BatchNorm1d(2048),
             nn.ReLU(),
             nn.Dropout(0.3),
@@ -47,36 +46,27 @@ class PoseNet(nn.Module):
             nn.Dropout(0.2),
             nn.Linear(1024, 512),
             nn.ReLU(),
-            nn.Linear(512, 3)  # Translation (x, y, z)
+            nn.Linear(512, 3)
         )
-
-        # 3. Smart Initialization
-        # Initialize translation to start around z=0.5 meters (common depth)
-        # This prevents the loss from starting massive.
+        
+        # Initialize translation bias to typical depth
         self.trans_head[-1].bias.data.fill_(0)
         self.trans_head[-1].bias.data[2] = 0.5
 
     def forward(self, x):
-        # x shape: [Batch, 3, 224, 224]
+        """Forward pass: RGB image -> (rotation, translation)."""
+        features = self.backbone(x).view(x.size(0), -1)
         
-        # 1. Extract Features
-        features = self.backbone(x) # Output: [Batch, 2048, 1, 1]
-        features = features.view(features.size(0), -1) # Flatten -> [Batch, 2048]
-        
-        # 2. Predict Heads
         rotation = self.rot_head(features)
-        translation = self.trans_head(features)
-        
-        # Normalize quaternion to valid unit vector
         rotation = torch.nn.functional.normalize(rotation, p=2, dim=1)
+        
+        translation = self.trans_head(features)
         
         return rotation, translation
 
+
 if __name__ == "__main__":
-    # Test the model shape
-    net = PoseNet()
-    dummy_input = torch.randn(2, 3, 224, 224)
-    rot, trans = net(dummy_input)
-    print(f"\n✅ Output Shapes Check (ResNet50):")
-    print(f"   Rotation: {rot.shape} (Should be [2, 4])")
-    print(f"   Translation: {trans.shape} (Should be [2, 3])")
+    model = PoseNetRGB()
+    x = torch.randn(2, 3, 224, 224)
+    rot, trans = model(x)
+    print(f"Rotation: {rot.shape}, Translation: {trans.shape}")

@@ -1,10 +1,25 @@
-torch>=2.0.0
-torchvision>=0.15.0
-opencv-python>=4.8.0
-numpy>=1.24.0
-scipy>=1.10.0
-matplotlib>=3.7.0
-pyyaml>=6.0
-tqdm>=4.65.0
-ultralytics>=8.0.0
-Pillow>=9.5.0
+# Core dependencies for 6D Pose Estimation project
+# Python 3.10+ required
+
+# Deep Learning
+torch==2.9.1+cu130
+torchvision==0.24.1+cu130
+
+# Computer Vision
+opencv-python==4.12.0.88
+ultralytics==8.3.237
+
+# Numerical Computing
+numpy==2.2.6
+scipy==1.15.2
+
+# Visualization
+matplotlib==3.10.8
+pillow==12.0.0
+
+# Data Loading
+PyYAML==6.0.3
+tqdm==4.67.1
+
+# Note: To install PyTorch with CUDA 13.0 support:
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130

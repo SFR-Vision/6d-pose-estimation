@@ -6,22 +6,16 @@ channels:
   - defaults
 dependencies:
   - python=3.10
-  # CORE LIBRARIES (Conda handles binary conflicts for these)
-  - pytorch-cuda=12.1
-  - pytorch
-  - torchvision
-  - open3d
-  - matplotlib
-  - numpy
-  - scipy
-  - pyyaml
-  - tqdm
-  - scikit-learn
-  - jupyter
-  - ipykernel
-  
-  # PIP PACKAGES (For things best installed via pip)
+  - pytorch-cuda=13.0
+  - pytorch=2.9.1
+  - torchvision=0.24.1
+  - numpy=2.2.6
+  - scipy=1.15.2
+  - matplotlib=3.10.8
+  - pillow=12.0.0
+  - pyyaml=6.0.3
+  - tqdm=4.67.1
   - pip
   - pip:
-    - ultralytics
-    - opencv-python
+    - ultralytics==8.3.237
+    - opencv-python==4.12.0.88

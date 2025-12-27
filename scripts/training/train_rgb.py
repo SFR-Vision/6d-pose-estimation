@@ -1,7 +1,8 @@
+"""Training script for RGB pose estimation model."""
+
 import os
 import sys
 
-# Add project root to path
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, PROJECT_ROOT)
 
@@ -12,46 +13,40 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from tqdm import tqdm
-import time
 
-# Custom Modules
-from data.dataset_rgb import LineMODDataset
-from models.pose_net_rgb import PoseNet
-from models.loss import ADDLoss
+from data.dataset_rgb import LineMODDatasetRGB
+from models.pose_net_rgb import PoseNetRGB
+from models.pose_loss import PoseLoss
+from models.add_loss import ADDLoss
 
-# ================= CONFIGURATION =================
+# Configuration
 DATA_ROOT = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "data")
 MODEL_MESH_DIR = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "models")
 SAVE_DIR = os.path.join(PROJECT_ROOT, "weights_rgb")
 
-EPOCHS = 50            # Increased for better convergence
+EPOCHS = 75
+BATCH_SIZE = 32
+LEARNING_RATE = 1e-4
+WEIGHT_DECAY = 1e-4
 
-BATCH_SIZE = 16
-LEARNING_RATE = 1e-4    # Higher initial LR (scheduler will reduce it)
-WEIGHT_DECAY = 1e-4     # Regularization
-
-# Checkpoint Paths
 CKPT_LAST = os.path.join(SAVE_DIR, "last_pose_model.pth")
 CKPT_BEST = os.path.join(SAVE_DIR, "best_pose_model.pth")
-# =================================================
+
 
 def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"🚀 Training on device: {device}")
+    print(f"Training RGB model on {device}")
     
-    if not os.path.exists(SAVE_DIR): os.makedirs(SAVE_DIR)
+    os.makedirs(SAVE_DIR, exist_ok=True)
 
-    # 1. Data with Augmentation
-    print("📂 Loading Datasets...")
+    # Data transforms
     train_transform = transforms.Compose([
         transforms.ToPILImage(),
         transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.05),
         transforms.RandomGrayscale(p=0.1),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        # Occlusion Simulation (Applied AFTER normalization)
-        # Reduced probability (30%) to avoid being too aggressive during training
-        transforms.RandomErasing(p=0.3, scale=(0.02, 0.1), ratio=(0.3, 3.3), value='random')
+        transforms.RandomErasing(p=0.2, scale=(0.02, 0.1))
     ])
     
     val_transform = transforms.Compose([
@@ -60,132 +55,114 @@ def train():
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
-    print("   Loading training set...")
-    train_set = LineMODDataset(DATA_ROOT, mode='train', transform=train_transform, augment_bbox=True)
-    print("   Loading validation set...")
-    val_set   = LineMODDataset(DATA_ROOT, mode='val', transform=val_transform, augment_bbox=False)
+    # Datasets
+    train_set = LineMODDatasetRGB(DATA_ROOT, mode='train', transform=train_transform, augment_bbox=True)
+    val_set = LineMODDatasetRGB(DATA_ROOT, mode='val', transform=val_transform, augment_bbox=False)
     
-    print("   Creating data loaders...")
-    # Use 4 workers for faster data loading (safe number for Windows)
-    # Set to 0 if you experience hanging/freezing
-    num_workers = 4
     train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, 
-                               num_workers=num_workers, pin_memory=True, persistent_workers=True if num_workers > 0 else False)
-    val_loader   = DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=False, 
-                               num_workers=num_workers, pin_memory=True, persistent_workers=True if num_workers > 0 else False)
-    print(f"   ✅ Ready: {len(train_set)} train, {len(val_set)} val samples")
+                              num_workers=4, pin_memory=True, persistent_workers=True)
+    val_loader = DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=False, 
+                            num_workers=4, pin_memory=True, persistent_workers=True)
+    print(f"Train: {len(train_set)}, Val: {len(val_set)} samples")
 
-    # 2. Model & Optimizer
-    model = PoseNet(pretrained=True).to(device)
+    # Model and optimizer
+    model = PoseNetRGB(pretrained=True).to(device)
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=5, min_lr=1e-7)
     
-    # Learning Rate Scheduler (Reduce on Plateau)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=5, min_lr=1e-7
-    )
-    
-    # Use PURE ADD Loss (set rotation/translation weights to 0)
-    criterion = ADDLoss(MODEL_MESH_DIR, device, rot_weight=0.0, trans_weight=0.0)
+    criterion = PoseLoss(rot_weight=1.0, trans_weight=10.0, rotation_loss='geodesic')
+    eval_criterion = ADDLoss(MODEL_MESH_DIR, device)
 
-    # 3. AUTO-RESUME LOGIC (with Architecture Compatibility Check)
+    # Resume from checkpoint
     start_epoch = 0
-    best_val_loss = float('inf')
+    best_acc = 0.0
 
     if os.path.exists(CKPT_LAST):
-        print(f"🔄 Found checkpoint: {CKPT_LAST}")
-        checkpoint = torch.load(CKPT_LAST)
-        
+        print(f"Resuming from checkpoint: {CKPT_LAST}")
+        checkpoint = torch.load(CKPT_LAST, map_location=device, weights_only=False)
         try:
             model.load_state_dict(checkpoint['model_state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             start_epoch = checkpoint['epoch'] + 1
-            best_val_loss = checkpoint.get('best_val_loss', float('inf'))
-            
-            print(f"   ✅ Resuming from Epoch {start_epoch+1} (Best Loss so far: {best_val_loss:.4f})")
-        except RuntimeError as e:
-            print(f"   ⚠️ Checkpoint architecture mismatch!")
-            print(f"   This happens when model architecture changed.")
-            print(f"   Starting fresh training with NEW architecture...")
-            print(f"   (Old checkpoint backed up, you can restore it if needed)")
-            start_epoch = 0
-            best_val_loss = float('inf')
+            best_acc = checkpoint.get('best_acc', 0.0)
+            print(f"Resumed at epoch {start_epoch}, best accuracy: {best_acc:.2f}%")
+        except RuntimeError:
+            print("Architecture mismatch, starting fresh")
     else:
-        print("✨ No checkpoint found. Starting fresh.")
+        print("Starting training from scratch")
 
-    # 4. Training Loop
+    # Training loop
     for epoch in range(start_epoch, EPOCHS):
         model.train()
-        running_loss = 0.0
+        train_loss_accum = 0.0
         
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS} [Train]")
-        
-        for images, gt_rot, gt_trans, obj_ids in pbar:
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS}")
+        for images, gt_rot, gt_trans, obj_ids, _, _ in pbar:
             images = images.to(device)
             gt_rot = gt_rot.to(device)
             gt_trans = gt_trans.to(device)
-            obj_ids = obj_ids.to(device)
             
             optimizer.zero_grad()
             pred_rot, pred_trans = model(images)
             
-            # ADD Loss (Meters)
-            loss = criterion(pred_rot, pred_trans, gt_rot, gt_trans, obj_ids)
-            
+            loss = criterion(pred_rot, pred_trans, gt_rot, gt_trans)
             loss.backward()
-            
-            # Gradient Clipping (Prevents exploding gradients)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             
-            running_loss += loss.item()
-            pbar.set_postfix({'ADD Loss': f"{loss.item():.4f}"})
+            train_loss_accum += loss.item()
+            pbar.set_postfix({'Loss': f"{loss.item():.4f}"})
             
-        epoch_loss = running_loss / len(train_loader)
-        
+        avg_train_loss = train_loss_accum / len(train_loader)
+
         # Validation
         model.eval()
-        val_loss = 0.0
+        val_add_sum = 0.0
+        val_acc_sum = 0.0
+        val_batches = 0
+        
         with torch.no_grad():
-            for images, gt_rot, gt_trans, obj_ids in val_loader:
+            for images, gt_rot, gt_trans, obj_ids, _, _ in val_loader:
                 images = images.to(device)
                 gt_rot = gt_rot.to(device)
                 gt_trans = gt_trans.to(device)
                 obj_ids = obj_ids.to(device)
                 
                 pred_rot, pred_trans = model(images)
-                loss = criterion(pred_rot, pred_trans, gt_rot, gt_trans, obj_ids)
-                val_loss += loss.item()
+                
+                metrics = eval_criterion.eval_metrics(pred_rot, pred_trans, gt_rot, gt_trans, obj_ids)
+                val_add_sum += metrics['add_mean']
+                val_acc_sum += metrics['add_01d_acc']
+                val_batches += 1
+
+        val_add = val_add_sum / val_batches
+        val_acc = val_acc_sum / val_batches
         
-        avg_val_loss = val_loss / len(val_loader)
-        
-        # Update learning rate based on validation loss
-        scheduler.step(avg_val_loss)
+        scheduler.step(val_acc)
         current_lr = optimizer.param_groups[0]['lr']
         
-        print(f"   Train ADD: {epoch_loss:.4f} m | Val ADD: {avg_val_loss:.4f} m | LR: {current_lr:.2e}")
-        
-        # 5. Saving Logic (Save Dicts, not just weights)
-        checkpoint_data = {
+        print(f"  Loss: {avg_train_loss:.4f} | ADD: {val_add:.1f}mm | ADD-0.1d: {val_acc:.1f}% | LR: {current_lr:.2e}")
+
+        # Checkpointing
+        ckpt = {
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
-            'best_val_loss': best_val_loss,
-            'curr_val_loss': avg_val_loss
+            'best_acc': best_acc,
+            'curr_acc': val_acc,
+            'curr_add': val_add
         }
+        
+        torch.save(ckpt, CKPT_LAST)
+        
+        if val_acc > best_acc:
+            best_acc = val_acc
+            ckpt['best_acc'] = best_acc
+            torch.save(ckpt, CKPT_BEST)
+            print(f"  New best model saved (ADD-0.1d: {best_acc:.2f}%)")
 
-        # Save 'Last' (Always)
-        torch.save(checkpoint_data, CKPT_LAST)
+    print(f"\nTraining complete. Best ADD-0.1d: {best_acc:.2f}%")
 
-        # Save 'Best' (Only if improved)
-        if avg_val_loss < best_val_loss:
-            best_val_loss = avg_val_loss
-            # Update the best loss in the dictionary before saving
-            checkpoint_data['best_val_loss'] = best_val_loss
-            torch.save(checkpoint_data, CKPT_BEST)
-            print(f"   ⭐ New Best Model Saved! ({avg_val_loss:.4f} m)")
-
-    print("\n✅ Training Complete!")
 
 if __name__ == "__main__":
     train()

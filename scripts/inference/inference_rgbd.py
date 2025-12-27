@@ -1,260 +1,208 @@
+"""Inference script for RGBD Model with YOLO Detection."""
+
 import os
 import sys
 
-# Add project root to path
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, PROJECT_ROOT)
-
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-import torch
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+import torch
 from torchvision import transforms
 from ultralytics import YOLO
-from scipy.spatial.transform import Rotation as R
 
-# Custom Modules
-try:
-    from models.pose_net_rgbd import PoseNetRGBD
-except ImportError:
-    print("❌ Error: Could not import PoseNetRGBD.")
-    sys.exit(1)
+from models.pose_net_rgbd import PoseNetRGBD
+from utils.mesh_utils import load_mesh_corners
+from utils.visualization import project_points, draw_3d_box, draw_axes
+from utils.camera import DEFAULT_K
 
-# ================= CONFIGURATION =================
-YOLO_PATH = os.path.join("runs", "detect", "linemod_yolo", "weights", "best.pt")
-POSE_PATH = os.path.join("weights_rgbd", "best_pose_model_rgbd.pth")
-MESH_DIR = os.path.join("datasets", "Linemod_preprocessed", "models")
+# Configuration
+YOLO_PATH = os.path.join(PROJECT_ROOT, "runs", "detect", "linemod_yolo", "weights", "best.pt")
+WEIGHTS_PATH = os.path.join(PROJECT_ROOT, "weights_rgbd", "best_pose_model.pth")
+MESH_DIR = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "models")
+TEST_DIR = os.path.join(PROJECT_ROOT, "datasets", "yolo_ready", "images", "test")
 
-# Standard Camera Matrix (calibrate for your camera!)
-K = np.array([[572.4114, 0.0, 325.2611],
-              [0.0, 573.57043, 242.04899],
-              [0.0, 0.0, 1.0]])
-
-# Map YOLO Class Indices to LineMOD Object IDs
 CLASS_ID_TO_OBJ_NAME = {
     0: "01", 1: "02", 2: "04", 3: "05", 4: "06", 5: "08",
     6: "09", 7: "10", 8: "11", 9: "12", 10: "13", 11: "14", 12: "15",
 }
-# =================================================
 
-def load_mesh_corners(obj_id_str):
-    """Loads mesh and returns tight bounding box corners"""
-    ply_name = f"obj_{obj_id_str}.ply"
-    path = os.path.join(MESH_DIR, ply_name)
-    
-    if not os.path.exists(path):
-        return None
 
-    with open(path, 'r') as f:
-        lines = f.readlines()
-    
-    verts = []
-    header_end = False
-    for line in lines:
-        if "end_header" in line: header_end = True; continue
-        if header_end:
-            vals = line.strip().split()
-            if len(vals) >= 3:
-                verts.append([float(vals[0]), float(vals[1]), float(vals[2])])
-    
-    # Unit conversion and outlier removal
-    verts = np.array(verts) / 1000.0
-    distances = np.linalg.norm(verts, axis=1)
-    verts_clean = verts[distances < 0.3]
-    if len(verts_clean) == 0: verts_clean = verts
-
-    # Statistical Box
-    min_pt = np.percentile(verts_clean, 1, axis=0)
-    max_pt = np.percentile(verts_clean, 99, axis=0)
-    
-    corners = np.array([
-        [min_pt[0], min_pt[1], min_pt[2]], [max_pt[0], min_pt[1], min_pt[2]],
-        [max_pt[0], max_pt[1], min_pt[2]], [min_pt[0], max_pt[1], min_pt[2]],
-        [min_pt[0], min_pt[1], max_pt[2]], [max_pt[0], min_pt[1], max_pt[2]],
-        [max_pt[0], max_pt[1], max_pt[2]], [min_pt[0], max_pt[1], max_pt[2]]
-    ])
-    return corners
-
-def project_points(points_3d, r_vec, t_vec, K):
-    """Project 3D points to 2D"""
-    if r_vec.shape == (4,): r_mat = R.from_quat(r_vec).as_matrix()
-    else: r_mat = r_vec
-    
-    p_cam = (r_mat @ points_3d.T).T + t_vec
-    z = p_cam[:, 2].copy()
-    z[z==0] = 0.001
-    
-    p_2d = np.zeros((points_3d.shape[0], 2))
-    p_2d[:, 0] = (p_cam[:, 0] * K[0, 0] / z) + K[0, 2]
-    p_2d[:, 1] = (p_cam[:, 1] * K[1, 1] / z) + K[1, 2]
-    return p_2d.astype(int)
-
-def draw_box(img, pts_2d, color=(0, 255, 0), thickness=2):
-    """Draw 3D bounding box"""
-    lines = [(0,1), (1,2), (2,3), (3,0), (4,5), (5,6), (6,7), (7,4), (0,4), (1,5), (2,6), (3,7)]
-    for s, e in lines:
-        cv2.line(img, tuple(pts_2d[s]), tuple(pts_2d[e]), color, thickness)
-    return img
-
-def run_inference(rgb_path, depth_path=None):
-    """
-    Run RGB-D pose inference on an image
-    
-    Args:
-        rgb_path: Path to RGB image
-        depth_path: Path to depth image (optional, will use dummy depth if None)
-    """
+def run_inference(img_path, depth_path=None):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"🚀 Processing: {rgb_path}")
+    print(f"RGBD inference with YOLO on {device}")
+    print(f"Processing: {img_path}")
     
-    # 1. Load Models
-    yolo = YOLO(YOLO_PATH)
-    pose_net = PoseNetRGBD(pretrained=False).to(device)
-    ckpt = torch.load(POSE_PATH, map_location=device)
-    pose_net.load_state_dict(ckpt['model_state_dict'] if 'model_state_dict' in ckpt else ckpt)
-    pose_net.eval()
-    
-    transform = transforms.Compose([
-        transforms.ToPILImage(), transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
-
-    # 2. Read RGB Image
-    original_img = cv2.imread(rgb_path)
-    if original_img is None: 
-        print("❌ RGB image not found.")
+    # Load models
+    if not os.path.exists(YOLO_PATH):
+        print(f"YOLO model not found: {YOLO_PATH}")
         return
+    if not os.path.exists(WEIGHTS_PATH):
+        print(f"Pose weights not found: {WEIGHTS_PATH}")
+        return
+        
+    yolo = YOLO(YOLO_PATH)
+    model = PoseNetRGBD(pretrained=False).to(device)
+    checkpoint = torch.load(WEIGHTS_PATH, map_location=device, weights_only=False)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model.eval()
+    print("Models loaded successfully")
+    
+    # Load RGB image
+    original_img = cv2.imread(img_path)
+    if original_img is None:
+        print(f"Image not found: {img_path}")
+        return
+    
     rgb_img = cv2.cvtColor(original_img, cv2.COLOR_BGR2RGB)
     h_img, w_img, _ = rgb_img.shape
+    viz_img = original_img.copy()
+    K = DEFAULT_K.copy()
     
-    # 3. Read Depth Image (or create dummy)
+    # Load depth image - parse filename to find from dataset
+    depth_img = None
     if depth_path and os.path.exists(depth_path):
         depth_img = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
-        print("   ✅ Using provided depth image")
-    else:
-        # Create dummy depth (uniform at 0.5m)
-        depth_img = np.ones((h_img, w_img), dtype=np.uint16) * 500  # 500mm
-        print("   ⚠️ No depth provided, using dummy depth (0.5m)")
+        print(f"Loaded depth from: {depth_path}")
     
-    viz_img = original_img.copy()
-
-    # 4. Detect Objects
-    results = yolo(rgb_path, verbose=False)
+    if depth_img is None:
+        # Try to parse filename: format is "XX_YYYY.png" where XX=object, YYYY=frame
+        base_name = os.path.basename(img_path)
+        if '_' in base_name:
+            parts = base_name.replace('.png', '').replace('.jpg', '').split('_')
+            if len(parts) >= 2:
+                obj_id = parts[0]
+                frame_id = parts[1]
+                dataset_depth_path = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", 
+                                                   "data", obj_id, "depth", f"{frame_id}.png")
+                if os.path.exists(dataset_depth_path):
+                    depth_img = cv2.imread(dataset_depth_path, cv2.IMREAD_UNCHANGED)
+                    print(f"Loaded depth from dataset: {dataset_depth_path}")
+    
+    if depth_img is None:
+        depth_img = np.zeros((h_img, w_img), dtype=np.uint16)
+        print("Warning: No depth image found, using zeros")
+    else:
+        # Squeeze if depth has extra channel dimension
+        if depth_img.ndim == 3:
+            depth_img = depth_img[:, :, 0]
+    
+    # YOLO detection
+    results = yolo(img_path, verbose=False)
     if not results[0].boxes:
-        print("   ⚠️ No objects detected.")
+        print("No objects detected by YOLO")
         return
-
-    print(f"   Found {len(results[0].boxes)} objects.")
-
-    # 5. Loop through detections
+    
+    print(f"YOLO detected {len(results[0].boxes)} objects")
+    
+    transform = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+    
+    img_size = 224
+    
+    # Process each detection
     for box in results[0].boxes:
-        # A. YOLO Coordinates
         x1, y1, x2, y2 = map(int, box.xyxy[0])
         cls_id = int(box.cls[0])
         conf = float(box.conf[0])
         
-        # B. Get Mesh ID
         obj_id_str = CLASS_ID_TO_OBJ_NAME.get(cls_id, "01")
         
-        # C. Crop RGB & Depth
+        # Bbox center in original image
         c_x_box, c_y_box = (x1 + x2) / 2, (y1 + y2) / 2
-        w, h = x2-x1, y2-y1
+        w, h = x2 - x1, y2 - y1
         size = max(w, h) * 1.2
-        new_x, new_y = int(c_x_box - size/2), int(c_y_box - size/2)
-        new_size = int(size)
+        crop_x1, crop_y1 = int(c_x_box - size/2), int(c_y_box - size/2)
+        crop_size = int(size)
         
-        pad_l = max(0, -new_x); pad_t = max(0, -new_y)
-        pad_r = max(0, (new_x + new_size) - w_img)
-        pad_b = max(0, (new_y + new_size) - h_img)
+        # Padding
+        pad_l = max(0, -crop_x1)
+        pad_t = max(0, -crop_y1)
+        pad_r = max(0, (crop_x1 + crop_size) - w_img)
+        pad_b = max(0, (crop_y1 + crop_size) - h_img)
         
         padded_rgb = cv2.copyMakeBorder(rgb_img, pad_t, pad_b, pad_l, pad_r, cv2.BORDER_CONSTANT, value=0)
         padded_depth = cv2.copyMakeBorder(depth_img, pad_t, pad_b, pad_l, pad_r, cv2.BORDER_CONSTANT, value=0)
         
-        crop_rgb = padded_rgb[new_y+pad_t:new_y+pad_t+new_size, new_x+pad_l:new_x+pad_l+new_size]
-        crop_depth = padded_depth[new_y+pad_t:new_y+pad_t+new_size, new_x+pad_l:new_x+pad_l+new_size]
+        adj_x1 = crop_x1 + pad_l
+        adj_y1 = crop_y1 + pad_t
         
-        crop_rgb_resized = cv2.resize(crop_rgb, (224, 224))
-        crop_depth_resized = cv2.resize(crop_depth, (224, 224))
+        crop_rgb = padded_rgb[adj_y1:adj_y1+crop_size, adj_x1:adj_x1+crop_size]
+        crop_depth = padded_depth[adj_y1:adj_y1+crop_size, adj_x1:adj_x1+crop_size]
         
-        # D. Normalize Depth
-        crop_depth_normalized = crop_depth_resized.astype(np.float32) / 1000.0
-        crop_depth_normalized = np.clip(crop_depth_normalized / 2.0, 0, 1)
-        crop_depth_normalized = crop_depth_normalized[..., np.newaxis]
+        crop_rgb_resized = cv2.resize(crop_rgb, (img_size, img_size))
+        crop_depth_resized = cv2.resize(crop_depth.astype(np.float32), (img_size, img_size))
         
-        # E. Pose Inference
+        # Normalize depth for CNN input
+        depth_meters = crop_depth_resized / 1000.0
+        depth_min, depth_max = 0.1, 1.6
+        depth_normalized = np.clip((depth_meters - depth_min) / (depth_max - depth_min), 0, 1)
+        depth_normalized[depth_meters < 0.01] = 0
+        
+        # Prepare inputs - depth needs shape [1, 1, 224, 224]
         input_rgb = transform(crop_rgb_resized).unsqueeze(0).to(device)
-        input_depth = torch.from_numpy(crop_depth_normalized).permute(2, 0, 1).unsqueeze(0).float().to(device)
+        input_depth = torch.tensor(depth_normalized[..., np.newaxis], dtype=torch.float32).permute(2, 0, 1).unsqueeze(0).to(device)
         
+        # Pose inference
         with torch.no_grad():
-            pred_rot, pred_trans = pose_net(input_rgb, input_depth)
-        pred_rot = pred_rot.cpu().numpy()[0]
-        pred_trans = pred_trans.cpu().numpy()[0]
+            pred_quat, pred_trans = model(input_rgb, input_depth)
         
-        # F. Geometric Correction
-        pred_z = pred_trans[2]
-        fx, fy, cx, cy = K[0,0], K[1,1], K[0,2], K[1,2]
+        pred_quat = pred_quat.cpu().numpy()[0]  # (4,)
+        pred_trans_np = pred_trans.cpu().numpy().flatten()  # (3,)
+        
+        # Geometric correction using YOLO bbox center
+        fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
+        pred_z = pred_trans_np[2]
         pred_x = (c_x_box - cx) * pred_z / fx
         pred_y = (c_y_box - cy) * pred_z / fy
         corrected_trans = np.array([pred_x, pred_y, pred_z])
-
-        # G. Visualization
-        corners_3d = load_mesh_corners(obj_id_str)
-        if corners_3d is not None:
-            # Draw 3D Box
-            box_2d = project_points(corners_3d, pred_rot, corrected_trans, K)
-            draw_box(viz_img, box_2d, color=(0, 255, 0), thickness=2)
+        
+        # Visualization
+        corners = load_mesh_corners(MESH_DIR, obj_id_str)
+        if corners is not None:
+            box_2d = project_points(corners, pred_quat, corrected_trans, K)
+            draw_3d_box(viz_img, box_2d, (255, 0, 255), 2)
+            draw_axes(viz_img, pred_quat, corrected_trans, K, scale=0.1)
             
-            # Draw Axes
-            origin = project_points(np.array([[0,0,0]]), pred_rot, corrected_trans, K)[0]
-            axis_x = project_points(np.array([[0.1,0,0]]), pred_rot, corrected_trans, K)[0]
-            axis_y = project_points(np.array([[0,0.1,0]]), pred_rot, corrected_trans, K)[0]
-            axis_z = project_points(np.array([[0,0,0.1]]), pred_rot, corrected_trans, K)[0]
-            
-            cv2.line(viz_img, tuple(origin), tuple(axis_x), (0,0,255), 2)  # X Red
-            cv2.line(viz_img, tuple(origin), tuple(axis_y), (255,0,0), 2)  # Y Blue
-            cv2.line(viz_img, tuple(origin), tuple(axis_z), (0,255,0), 2)  # Z Green
-            
-            # Label
-            cv2.putText(viz_img, f"{obj_id_str} ({conf:.2f})", (x1, y1-10), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-            
-            print(f"      Obj {obj_id_str}: Pose = {corrected_trans}, Conf = {conf:.2f}")
-
-    # 6. Show Result
+            cv2.putText(viz_img, f"{obj_id_str} ({conf:.2f})", (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 2)
+    
+    # Add legend
+    cv2.putText(viz_img, "Axes: X=Red(Front) | Y=Green(Left) | Z=Blue(Top)", 
+                (10, h_img - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+    cv2.putText(viz_img, "Magenta Box = 3D Pose Estimation", 
+                (10, h_img - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
+    
     plt.figure(figsize=(12, 10))
     plt.imshow(cv2.cvtColor(viz_img, cv2.COLOR_BGR2RGB))
-    plt.title("RGB-D 6D Pose Inference", fontsize=16)
+    plt.title("RGBD Model: 6D Pose Inference with YOLO Detection")
     plt.axis("off")
     plt.show()
 
+
 if __name__ == "__main__":
-    # Auto-pick test image or use command line argument
     if len(sys.argv) > 1:
-        RGB_IMG = sys.argv[1]
-        DEPTH_IMG = sys.argv[2] if len(sys.argv) > 2 else None
+        TEST_IMG = sys.argv[1]
+        TEST_DEPTH = sys.argv[2] if len(sys.argv) > 2 else None
     else:
-        # Auto-select from test directory
-        test_dir = os.path.join("datasets", "yolo_ready", "images", "test")
-        if os.path.exists(test_dir):
-            files = [f for f in os.listdir(test_dir) if f.endswith('.png') or f.endswith('.jpg')]
+        if os.path.exists(TEST_DIR):
+            files = [f for f in os.listdir(TEST_DIR) if f.endswith('.png') or f.endswith('.jpg')]
             if len(files) > 0:
                 random_file = np.random.choice(files)
-                RGB_IMG = os.path.join(test_dir, random_file)
-                
-                # Try to find corresponding depth
-                obj_id = random_file.split('_')[0]
-                frame_id = random_file.split('_')[1].split('.')[0]
-                DEPTH_IMG = os.path.join("datasets", "Linemod_preprocessed", "data", 
-                                        obj_id, "depth", f"{frame_id}.png")
-                
-                print(f"🎲 Auto-selected: {random_file}")
+                TEST_IMG = os.path.join(TEST_DIR, random_file)
+                TEST_DEPTH = None
+                print(f"Selected: {random_file}")
             else:
-                print(f"❌ No images found in {test_dir}")
+                print(f"No images found in {TEST_DIR}")
                 sys.exit(1)
         else:
-            print(f"❌ Directory not found: {test_dir}")
+            print(f"Directory not found: {TEST_DIR}")
             sys.exit(1)
-        
-    run_inference(RGB_IMG, DEPTH_IMG)
+    
+    run_inference(TEST_IMG, TEST_DEPTH)
