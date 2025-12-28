@@ -68,7 +68,7 @@ def evaluate_model(model, model_name, loader, criterion, is_rgbd=False, needs_ge
         return None
     
     model.eval()
-    all_metrics = {'add': [], 'add_s': [], 'add_01d': []}
+    all_metrics = {'add': [], 'add_s': [], 'add_2cm': []}
     
     with torch.no_grad():
         for batch in tqdm(loader, desc=f"Evaluating {model_name}", leave=False):
@@ -95,12 +95,12 @@ def evaluate_model(model, model_name, loader, criterion, is_rgbd=False, needs_ge
             metrics = criterion.eval_metrics(pred_rot, pred_trans, gt_rot, gt_trans, obj_ids)
             all_metrics['add'].append(metrics['add_mean'])
             all_metrics['add_s'].append(metrics['add_s_mean'])
-            all_metrics['add_01d'].append(metrics['add_01d_acc'])
+            all_metrics['add_2cm'].append(metrics['add_2cm_acc'])
     
     return {
         'ADD (mm)': np.mean(all_metrics['add']),
         'ADD-S (mm)': np.mean(all_metrics['add_s']),
-        'ADD-0.1d (%)': np.mean(all_metrics['add_01d']),
+        'ADD-2cm (%)': np.mean(all_metrics['add_2cm']),
     }
 
 
@@ -160,12 +160,12 @@ def main():
     # Print results
     print("\nResults:")
     print("-" * 60)
-    print(f"{'Model':<20} {'ADD (mm)':<12} {'ADD-S (mm)':<12} {'ADD-0.1d (%)':<12}")
+    print(f"{'Model':<20} {'ADD (mm)':<12} {'ADD-S (mm)':<12} {'ADD-2cm (%)':<12}")
     print("-" * 60)
     
     for name, metrics in results.items():
         if metrics is not None:
-            print(f"{name:<20} {metrics['ADD (mm)']:<12.2f} {metrics['ADD-S (mm)']:<12.2f} {metrics['ADD-0.1d (%)']:<12.1f}")
+            print(f"{name:<20} {metrics['ADD (mm)']:<12.2f} {metrics['ADD-S (mm)']:<12.2f} {metrics['ADD-2cm (%)']:<12.1f}")
         else:
             print(f"{name:<20} {'N/A':<12} {'N/A':<12} {'N/A':<12}")
     
@@ -177,8 +177,8 @@ def main():
         best_model = min(valid_results, key=lambda x: valid_results[x]['ADD (mm)'])
         print(f"\nBest by ADD: {best_model} ({valid_results[best_model]['ADD (mm)']:.2f}mm)")
         
-        best_by_acc = max(valid_results, key=lambda x: valid_results[x]['ADD-0.1d (%)'])
-        print(f"Best by ADD-0.1d: {best_by_acc} ({valid_results[best_by_acc]['ADD-0.1d (%)']:.1f}%)")
+        best_by_acc = max(valid_results, key=lambda x: valid_results[x]['ADD-2cm (%)'])
+        print(f"Best by ADD-2cm: {best_by_acc} ({valid_results[best_by_acc]['ADD-2cm (%)']:.1f}%)")
 
 
 if __name__ == '__main__':

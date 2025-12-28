@@ -156,7 +156,7 @@ def prepare_crop(rgb, depth, bbox, img_size=224):
 
 
 def run_inference(models, rgb_crop, depth_crop, bbox_center_crop, bbox_center_orig, K_crop, K_orig):
-    """Run inference with all models and correct translations to original image space."""
+    """Run inference with all models - NO corrections, raw predictions only."""
     predictions = {}
     
     transform = transforms.Compose([
@@ -178,10 +178,6 @@ def run_inference(models, rgb_crop, depth_crop, bbox_center_crop, bbox_center_or
     bbox_center_tensor = torch.from_numpy(bbox_center_crop).float().unsqueeze(0).to(DEVICE)
     K_crop_tensor = torch.from_numpy(K_crop).float().unsqueeze(0).to(DEVICE)
     
-    # Original camera parameters for geometric correction
-    fx_orig, fy_orig = K_orig[0, 0], K_orig[1, 1]
-    cx_orig, cy_orig = K_orig[0, 2], K_orig[1, 2]
-    
     with torch.no_grad():
         for name, model in models.items():
             try:
@@ -192,20 +188,13 @@ def run_inference(models, rgb_crop, depth_crop, bbox_center_crop, bbox_center_or
                 elif name == 'RGBD':
                     pred_rot, pred_trans = model(rgb_tensor, depth_tensor)
                 elif name == 'RGBD-Geo':
-                    # Use K_crop and bbox_center_crop - matching training setup
                     pred_rot, pred_trans = model(rgb_tensor, depth_tensor, depth_raw_tensor, bbox_center_tensor, K_crop_tensor)
                 
                 pred_rot_np = pred_rot.cpu().numpy()[0]
                 pred_trans_np = pred_trans.cpu().numpy().flatten()
                 
-                # Apply geometric correction: re-compute X,Y using original bbox center
-                # The predicted Z is correct; we just need to project to original image space
-                pred_z = pred_trans_np[2]
-                corrected_x = (bbox_center_orig[0] - cx_orig) * pred_z / fx_orig
-                corrected_y = (bbox_center_orig[1] - cy_orig) * pred_z / fy_orig
-                corrected_trans = np.array([corrected_x, corrected_y, pred_z])
-                
-                predictions[name] = (pred_rot_np, corrected_trans)
+                # Use raw predictions - NO correction
+                predictions[name] = (pred_rot_np, pred_trans_np)
             except Exception as e:
                 print(f"{name} inference failed: {e}")
     

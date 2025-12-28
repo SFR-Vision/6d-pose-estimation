@@ -4,6 +4,14 @@
 
 Real-time 6D object pose estimation using YOLO detection and deep learning with geometric constraints on the LineMOD dataset.
 
+## Team Members
+
+This project is a collaborative effort by the following team members:
+
+- **U**lugbek **R**akhmatullaev
+- **K**arim **A**bdelgelil **M**ohamed **S**halaby
+- **M**ohammad **F**akih
+
 ## Features
 
 - **Four Model Variants**: RGB, RGB-Geometric, RGBD, RGBD-Geometric

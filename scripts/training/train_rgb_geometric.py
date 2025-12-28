@@ -133,7 +133,7 @@ def train():
                 
                 metrics = eval_criterion.eval_metrics(pred_rot, pred_trans, gt_rot, gt_trans, obj_ids)
                 val_add_sum += metrics['add_mean']
-                val_acc_sum += metrics['add_01d_acc']
+                val_acc_sum += metrics['add_2cm_acc']
                 val_batches += 1
         
         val_add = val_add_sum / val_batches

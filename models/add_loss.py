@@ -13,7 +13,7 @@ SYMMETRIC_OBJECT_IDS = {9, 10}
 class ADDLoss(nn.Module):
     """
     ADD loss and evaluation metrics for 6D pose estimation.
-    Supports ADD, ADD-S (for symmetric objects), and ADD-0.1d accuracy.
+    Supports ADD, ADD-S (for symmetric objects), and ADD-2cm accuracy.
     """
     
     def __init__(self, model_dir, device, rot_weight=0.0, trans_weight=0.0):
@@ -163,7 +163,7 @@ class ADDLoss(nn.Module):
         
         add_distances = []
         add_s_distances = []
-        add_01d_correct = []
+        add_2cm_correct = []
         
         for i in range(batch_size):
             oid = int(obj_ids[i].item())
@@ -172,8 +172,8 @@ class ADDLoss(nn.Module):
                 continue
                 
             model_points = self.points[oid]
-            diameter = self.diameters.get(oid, 0.1)
-            threshold = 0.1 * diameter
+            # Constant 2cm threshold (0.02 meters)
+            threshold = 0.02
             
             gt_points = torch.mm(model_points, gt_R_mat[i].T) + gt_t[i]
             pred_points = torch.mm(model_points, pred_R_mat[i].T) + pred_t[i]
@@ -189,15 +189,15 @@ class ADDLoss(nn.Module):
             add_s_dist = min_dist.mean()
             add_s_distances.append(add_s_dist.item())
             
-            # ADD-0.1d
+            # ADD-2cm (constant 2cm threshold)
             is_symmetric = oid in SYMMETRIC_OBJECT_IDS
             effective_dist = add_s_dist if is_symmetric else add_dist
-            add_01d_correct.append(1.0 if effective_dist.item() < threshold else 0.0)
+            add_2cm_correct.append(1.0 if effective_dist.item() < threshold else 0.0)
         
         return {
             'add_mean': np.mean(add_distances) * 1000 if add_distances else 0,
             'add_s_mean': np.mean(add_s_distances) * 1000 if add_s_distances else 0,
-            'add_01d_acc': np.mean(add_01d_correct) * 100 if add_01d_correct else 0,
+            'add_2cm_acc': np.mean(add_2cm_correct) * 100 if add_2cm_correct else 0,
         }
 
     def _quat_to_mat(self, q):
