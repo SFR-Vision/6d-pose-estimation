@@ -141,30 +141,8 @@ def run_inference(img_path, depth_path=None):
         crop_rgb_resized = cv2.resize(crop_rgb, (img_size, img_size))
         crop_depth_resized = cv2.resize(crop_depth.astype(np.float32), (img_size, img_size))
         
-        # Scale factor for crop -> resize
-        scale = img_size / crop_size
-        
-        # Bbox center in CROP coordinates (then scale to resized)
-        center_in_padded_x = c_x_box + pad_l
-        center_in_padded_y = c_y_box + pad_t
-        center_in_crop_x = (center_in_padded_x - adj_x1) * scale
-        center_in_crop_y = (center_in_padded_y - adj_y1) * scale
-        center_in_crop = np.array([center_in_crop_x, center_in_crop_y], dtype=np.float32)
-        center_in_crop = np.clip(center_in_crop, 0, img_size - 1)
-        
-        # Adjust camera intrinsics for crop and resize (matching dataset_rgbd.py)
-        fx, fy = K[0, 0], K[1, 1]
-        cx, cy = K[0, 2], K[1, 2]
-        # x1 in dataset = crop_x1 in inference (before padding adjustment)
-        cx_crop = (cx + pad_l - crop_x1) * scale
-        cy_crop = (cy + pad_t - crop_y1) * scale
-        fx_crop = fx * scale
-        fy_crop = fy * scale
-        K_crop = np.array([
-            [fx_crop, 0, cx_crop],
-            [0, fy_crop, cy_crop],
-            [0, 0, 1]
-        ], dtype=np.float32)
+        # Use original bbox center and K (consistent with dataset_rgbd.py)
+        bbox_center_orig = np.array([c_x_box, c_y_box], dtype=np.float32)
         
         # Normalize depth for CNN input
         depth_meters = crop_depth_resized / 1000.0
@@ -178,8 +156,8 @@ def run_inference(img_path, depth_path=None):
         input_depth = torch.tensor(depth_normalized[..., np.newaxis], dtype=torch.float32).permute(2, 0, 1).unsqueeze(0).to(device)
         # Depth raw: [224, 224] -> [1, 224, 224]
         input_depth_raw = torch.tensor(depth_meters, dtype=torch.float32).unsqueeze(0).to(device)
-        bbox_center = torch.from_numpy(center_in_crop).float().unsqueeze(0).to(device)
-        cam_matrix = torch.tensor(K_crop, dtype=torch.float32).unsqueeze(0).to(device)
+        bbox_center = torch.from_numpy(bbox_center_orig).float().unsqueeze(0).to(device)
+        cam_matrix = torch.tensor(K, dtype=torch.float32).unsqueeze(0).to(device)
         
         # Pose inference
         with torch.no_grad():

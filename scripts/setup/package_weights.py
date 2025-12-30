@@ -14,7 +14,6 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 WEIGHT_FOLDERS = [
     "weights_rgb",
     "weights_rgb_geometric", 
-    "weights_rgbd",
     "weights_rgbd_geometric",
     "runs/detect/linemod_yolo/weights"
 ]

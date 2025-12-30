@@ -13,6 +13,8 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from tqdm import tqdm
+import json
+import matplotlib.pyplot as plt
 
 from data.dataset_rgb import LineMODDatasetRGB
 from models.pose_net_rgb_geometric import PoseNetRGBGeometric
@@ -25,7 +27,7 @@ MODEL_DIR = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "mode
 WEIGHTS_DIR = os.path.join(PROJECT_ROOT, "weights_rgb_geometric")
 os.makedirs(WEIGHTS_DIR, exist_ok=True)
 
-BATCH_SIZE = 32
+BATCH_SIZE = 48
 EPOCHS = 75
 LEARNING_RATE = 1e-4
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -40,10 +42,8 @@ def train():
     # Data transforms
     train_transform = transforms.Compose([
         transforms.ToPILImage(),
-        transforms.ColorJitter(0.3, 0.3, 0.3, 0.05),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        transforms.RandomErasing(p=0.2, scale=(0.02, 0.1))
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
     val_transform = transforms.Compose([
@@ -53,7 +53,7 @@ def train():
     ])
 
     # Datasets
-    train_set = LineMODDatasetRGB(DATA_ROOT, mode='train', transform=train_transform, augment_bbox=True)
+    train_set = LineMODDatasetRGB(DATA_ROOT, mode='train', transform=train_transform, augment_bbox=False)
     val_set = LineMODDatasetRGB(DATA_ROOT, mode='val', transform=val_transform, augment_bbox=False)
     
     train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
@@ -63,9 +63,9 @@ def train():
     # Model and optimizer
     model = PoseNetRGBGeometric(pretrained=True).to(DEVICE)
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=5)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=10, min_lr=1e-6)
     
-    criterion = PoseLoss(rot_weight=1.0, trans_weight=10.0, rotation_loss='geodesic')
+    criterion = PoseLoss(rot_weight=2.0, trans_weight=5.0, rotation_loss='geodesic')
     eval_criterion = ADDLoss(MODEL_DIR, DEVICE)
 
     print(f"Model parameters: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
@@ -89,6 +89,8 @@ def train():
         print("Starting training from scratch")
 
     # Training loop
+    history = {'train_loss': [], 'val_loss': [], 'val_add': [], 'val_acc': [], 'lr': []}
+    
     for epoch in range(start_epoch, EPOCHS):
         model.train()
         train_loss = 0.0
@@ -100,22 +102,21 @@ def train():
             gt_trans = gt_trans.to(DEVICE)
             bbox_center = bbox_center.to(DEVICE)
             cam_matrix = cam_matrix.to(DEVICE)
-            
+
             optimizer.zero_grad()
             pred_rot, pred_trans = model(rgb, bbox_center, cam_matrix)
-            
             loss = criterion(pred_rot, pred_trans, gt_rot, gt_trans)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
-            
+
             train_loss += loss.item()
-            pbar.set_postfix({'Loss': f"{loss.item():.4f}"})
-        
+            pbar.set_postfix({'Loss': f'{loss.item():.4f}'})
+
         avg_train_loss = train_loss / len(train_loader)
 
         # Validation
         model.eval()
+        val_loss_sum = 0.0
         val_add_sum = 0.0
         val_acc_sum = 0.0
         val_batches = 0
@@ -125,23 +126,26 @@ def train():
                 rgb = rgb.to(DEVICE)
                 gt_rot = gt_rot.to(DEVICE)
                 gt_trans = gt_trans.to(DEVICE)
-                obj_ids = obj_ids.to(DEVICE)
                 bbox_center = bbox_center.to(DEVICE)
                 cam_matrix = cam_matrix.to(DEVICE)
-                
+
                 pred_rot, pred_trans = model(rgb, bbox_center, cam_matrix)
+                
+                val_loss = criterion(pred_rot, pred_trans, gt_rot, gt_trans)
+                val_loss_sum += val_loss.item()
                 
                 metrics = eval_criterion.eval_metrics(pred_rot, pred_trans, gt_rot, gt_trans, obj_ids)
                 val_add_sum += metrics['add_mean']
                 val_acc_sum += metrics['add_2cm_acc']
                 val_batches += 1
         
+        avg_val_loss = val_loss_sum / val_batches
         val_add = val_add_sum / val_batches
         val_acc = val_acc_sum / val_batches
         
         scheduler.step(val_acc)
         
-        print(f"  Loss: {avg_train_loss:.4f} | ADD: {val_add:.1f}mm | ADD-0.1d: {val_acc:.1f}% | LR: {optimizer.param_groups[0]['lr']:.2e}")
+        print(f"  Train: {avg_train_loss:.4f} | Val: {avg_val_loss:.4f} | ADD: {val_add:.1f}mm | ACC: {val_acc:.1f}% | LR: {optimizer.param_groups[0]['lr']:.2e}")
 
         # Checkpointing
         ckpt = {
@@ -157,9 +161,66 @@ def train():
             best_acc = val_acc
             ckpt['best_acc'] = best_acc
             torch.save(ckpt, CKPT_BEST)
-            print(f"  New best model saved (ADD-0.1d: {best_acc:.2f}%)")
+            print(f"  New best model saved (ADD-2cm: {best_acc:.2f}%)")
+        
+        # Save history
+        history['train_loss'].append(avg_train_loss)
+        history['val_loss'].append(avg_val_loss)
+        history['val_add'].append(val_add)
+        history['val_acc'].append(val_acc)
+        history['lr'].append(optimizer.param_groups[0]['lr'])
 
-    print(f"\nTraining complete. Best ADD-0.1d: {best_acc:.2f}%")
+    # Save history to JSON
+    history_path = os.path.join(WEIGHTS_DIR, 'training_history.json')
+    with open(history_path, 'w') as f:
+        json.dump(history, f, indent=2)
+    print(f"Training history saved to {history_path}")
+    
+    # Plot training curves
+    if len(history['train_loss']) > 0:
+        fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+        
+        # Loss plot
+        axes[0, 0].plot(history['train_loss'], label='Train Loss', color='blue')
+        axes[0, 0].plot(history['val_loss'], label='Val Loss', color='orange')
+        axes[0, 0].set_xlabel('Epoch')
+        axes[0, 0].set_ylabel('Loss')
+        axes[0, 0].set_title('Training vs Validation Loss')
+        axes[0, 0].legend()
+        axes[0, 0].grid(True)
+        
+        # ADD plot
+        axes[0, 1].plot(history['val_add'], label='Val ADD (mm)', color='green')
+        axes[0, 1].set_xlabel('Epoch')
+        axes[0, 1].set_ylabel('ADD (mm)')
+        axes[0, 1].set_title('Validation ADD Error')
+        axes[0, 1].legend()
+        axes[0, 1].grid(True)
+        
+        # Accuracy plot
+        axes[1, 0].plot(history['val_acc'], label='Val ACC (%)', color='red')
+        axes[1, 0].set_xlabel('Epoch')
+        axes[1, 0].set_ylabel('Accuracy (%)')
+        axes[1, 0].set_title('Validation ADD-2cm Accuracy')
+        axes[1, 0].legend()
+        axes[1, 0].grid(True)
+        
+        # Learning Rate plot
+        axes[1, 1].plot(history['lr'], label='Learning Rate', color='purple')
+        axes[1, 1].set_xlabel('Epoch')
+        axes[1, 1].set_ylabel('Learning Rate')
+        axes[1, 1].set_title('Learning Rate Schedule')
+        axes[1, 1].legend()
+        axes[1, 1].grid(True)
+        axes[1, 1].set_yscale('log')
+        
+        plt.tight_layout()
+        plot_path = os.path.join(WEIGHTS_DIR, 'training_curves.png')
+        plt.savefig(plot_path, dpi=150)
+        plt.close()
+        print(f"Training curves saved to {plot_path}")
+
+    print(f"\nTraining complete. Best ADD-2cm: {best_acc:.2f}%")
 
 
 if __name__ == '__main__':

@@ -144,29 +144,9 @@ class LineMODDatasetRGBD(Dataset):
 
         crop_size = int(size)
 
-        # Map bbox center to crop coordinates
-        center_padded_x = bbox_center_gt[0] + pad_l
-        center_padded_y = bbox_center_gt[1] + pad_t
-        center_crop_x = center_padded_x - x1
-        center_crop_y = center_padded_y - y1
-        
-        center_in_crop = np.array([center_crop_x, center_crop_y], dtype=np.float32)
-        scale = self.img_size / crop_size
-        center_resized = center_in_crop * scale
-        center_resized = np.clip(center_resized, 0, self.img_size - 1)
-
-        # Adjust camera intrinsics for crop and resize
-        fx, fy = cam_K[0, 0], cam_K[1, 1]
-        cx, cy = cam_K[0, 2], cam_K[1, 2]
-        cx_crop = (cx + pad_l - x1) * scale
-        cy_crop = (cy + pad_t - y1) * scale
-        fx_crop = fx * scale
-        fy_crop = fy * scale
-        cam_K_crop = np.array([
-            [fx_crop, 0, cx_crop],
-            [0, fy_crop, cy_crop],
-            [0, 0, 1]
-        ], dtype=np.float32)
+        # Use original bbox center (same as dataset_rgb.py for consistency)
+        # The model will use original K and original bbox_center
+        bbox_center = bbox_center_gt.copy()
 
         # Resize
         rgb_crop = cv2.resize(rgb_crop, (self.img_size, self.img_size))
@@ -200,7 +180,7 @@ class LineMODDatasetRGBD(Dataset):
         # Convert to tensors
         depth_crop_tensor = torch.from_numpy(depth_crop_normalized).permute(2, 0, 1).float()
         depth_raw_tensor = torch.from_numpy(depth_raw_meters).float()
-        bbox_center_tensor = torch.from_numpy(center_resized).float()
-        cam_K_tensor = torch.from_numpy(cam_K_crop).float()
+        bbox_center_tensor = torch.from_numpy(bbox_center).float()
+        cam_K_tensor = torch.from_numpy(cam_K).float()  # Use original K
 
         return rgb_crop, depth_crop_tensor, depth_raw_tensor, quaternion, translation, obj_id, bbox_center_tensor, cam_K_tensor

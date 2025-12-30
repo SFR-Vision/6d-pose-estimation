@@ -1,4 +1,4 @@
-"""Per-object ADD metrics comparison for all 4 pose estimation models."""
+"""Per-object ADD metrics comparison for all 3 pose estimation models."""
 
 import os
 import sys
@@ -45,7 +45,6 @@ SYMMETRIC_OBJECTS = {8, 9}  # 09-eggbox, 10-glue
 WEIGHTS = {
     'RGB': os.path.join(PROJECT_ROOT, "weights_rgb", "best_pose_model.pth"),
     'RGB-Geo': os.path.join(PROJECT_ROOT, "weights_rgb_geometric", "best_pose_model.pth"),
-    'RGBD': os.path.join(PROJECT_ROOT, "weights_rgbd", "best_pose_model.pth"),
     'RGBD-Geo': os.path.join(PROJECT_ROOT, "weights_rgbd_geometric", "best_pose_model.pth"),
 }
 
@@ -62,9 +61,6 @@ def load_pose_model(model_name, weights_path):
         elif model_name == 'RGB-Geo':
             from models.pose_net_rgb_geometric import PoseNetRGBGeometric
             model = PoseNetRGBGeometric(pretrained=False)
-        elif model_name == 'RGBD':
-            from models.pose_net_rgbd import PoseNetRGBD
-            model = PoseNetRGBD(pretrained=False)
         elif model_name == 'RGBD-Geo':
             from models.pose_net_rgbd_geometric import PoseNetRGBDGeometric
             model = PoseNetRGBDGeometric(pretrained=False)
@@ -105,8 +101,6 @@ def evaluate_per_object(model, model_name, dataset, add_loss, is_rgbd=False, nee
                 
                 if needs_geometry:
                     pred_rot, pred_trans = model(rgb, depth, depth_raw, bbox_center, cam_matrix)
-                else:
-                    pred_rot, pred_trans = model(rgb, depth)
             else:
                 rgb, gt_rot, gt_trans, obj_id, bbox_center, cam_matrix = sample
                 rgb = rgb.unsqueeze(0).to(DEVICE)
@@ -201,12 +195,6 @@ def main():
         )
     
     if rgbd_dataset is not None:
-        if models['RGBD'] is not None:
-            all_results['RGBD'] = evaluate_per_object(
-                models['RGBD'], 'RGBD', rgbd_dataset, add_loss,
-                is_rgbd=True, needs_geometry=False
-            )
-        
         if models['RGBD-Geo'] is not None:
             all_results['RGBD-Geo'] = evaluate_per_object(
                 models['RGBD-Geo'], 'RGBD-Geo', rgbd_dataset, add_loss,
@@ -218,7 +206,7 @@ def main():
     print("Per-Object ADD Metrics (mm) - Lower is better")
     print("=" * 80)
     
-    model_names = [name for name in ['RGB', 'RGB-Geo', 'RGBD', 'RGBD-Geo'] if name in all_results]
+    model_names = [name for name in ['RGB', 'RGB-Geo', 'RGBD-Geo'] if name in all_results]
     
     header = f"{'Object':<18}"
     for name in model_names:

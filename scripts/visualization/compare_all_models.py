@@ -1,4 +1,4 @@
-"""Compare all 4 pose estimation models on the test set."""
+"""Compare all 3 pose estimation models on the test set."""
 
 import os
 import sys
@@ -25,7 +25,6 @@ DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 WEIGHTS = {
     'RGB': os.path.join(PROJECT_ROOT, "weights_rgb", "best_pose_model.pth"),
     'RGB-Geometric': os.path.join(PROJECT_ROOT, "weights_rgb_geometric", "best_pose_model.pth"),
-    'RGBD': os.path.join(PROJECT_ROOT, "weights_rgbd", "best_pose_model.pth"),
     'RGBD-Geometric': os.path.join(PROJECT_ROOT, "weights_rgbd_geometric", "best_pose_model.pth"),
 }
 
@@ -43,9 +42,6 @@ def load_model(model_name, weights_path):
         elif model_name == 'RGB-Geometric':
             from models.pose_net_rgb_geometric import PoseNetRGBGeometric
             model = PoseNetRGBGeometric(pretrained=False)
-        elif model_name == 'RGBD':
-            from models.pose_net_rgbd import PoseNetRGBD
-            model = PoseNetRGBD(pretrained=False)
         elif model_name == 'RGBD-Geometric':
             from models.pose_net_rgbd_geometric import PoseNetRGBDGeometric
             model = PoseNetRGBDGeometric(pretrained=False)
@@ -80,8 +76,6 @@ def evaluate_model(model, model_name, loader, criterion, is_rgbd=False, needs_ge
                 
                 if 'Geometric' in model_name:
                     pred_rot, pred_trans = model(rgb, depth, depth_raw, bbox_center, cam_matrix)
-                else:
-                    pred_rot, pred_trans = model(rgb, depth)
             else:
                 rgb, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix = batch
                 rgb, gt_rot, gt_trans, obj_ids = rgb.to(DEVICE), gt_rot.to(DEVICE), gt_trans.to(DEVICE), obj_ids.to(DEVICE)
@@ -149,10 +143,6 @@ def main():
                                                    is_rgbd=False, needs_geometry=True)
     
     if rgbd_loader is not None:
-        if models['RGBD'] is not None:
-            results['RGBD'] = evaluate_model(models['RGBD'], 'RGBD', rgbd_loader, criterion,
-                                              is_rgbd=True, needs_geometry=False)
-        
         if models['RGBD-Geometric'] is not None:
             results['RGBD-Geometric'] = evaluate_model(models['RGBD-Geometric'], 'RGBD-Geometric', rgbd_loader, criterion,
                                                         is_rgbd=True, needs_geometry=True)

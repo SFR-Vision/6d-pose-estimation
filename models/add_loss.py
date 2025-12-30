@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 
 # LineMOD symmetric objects (eggbox and glue)
-SYMMETRIC_OBJECT_IDS = {9, 10}
+SYMMETRIC_OBJECT_IDS = {8, 9}
 
 
 class ADDLoss(nn.Module):

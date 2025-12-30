@@ -25,7 +25,6 @@ MESH_DIR = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "model
 WEIGHTS = {
     'RGB': os.path.join(PROJECT_ROOT, "weights_rgb", "best_pose_model.pth"),
     'RGB-Geo': os.path.join(PROJECT_ROOT, "weights_rgb_geometric", "best_pose_model.pth"),
-    'RGBD': os.path.join(PROJECT_ROOT, "weights_rgbd", "best_pose_model.pth"),
     'RGBD-Geo': os.path.join(PROJECT_ROOT, "weights_rgbd_geometric", "best_pose_model.pth"),
 }
 
@@ -48,9 +47,6 @@ def load_models():
             elif name == 'RGB-Geo':
                 from models.pose_net_rgb_geometric import PoseNetRGBGeometric
                 model = PoseNetRGBGeometric(pretrained=False)
-            elif name == 'RGBD':
-                from models.pose_net_rgbd import PoseNetRGBD
-                model = PoseNetRGBD(pretrained=False)
             elif name == 'RGBD-Geo':
                 from models.pose_net_rgbd_geometric import PoseNetRGBDGeometric
                 model = PoseNetRGBDGeometric(pretrained=False)
@@ -131,32 +127,21 @@ def prepare_crop(rgb, depth, bbox, img_size=224):
     rgb_crop = cv2.resize(rgb_crop, (img_size, img_size))
     depth_crop = cv2.resize(depth_crop, (img_size, img_size))
     
-    scale = img_size / size
-    bbox_center_crop = np.array([img_size/2, img_size/2], dtype=np.float32)
-    bbox_center_orig = np.array([cx, cy], dtype=np.float32)  # Keep original center
+    # Use original bbox center (consistent with datasets)
+    bbox_center = np.array([cx, cy], dtype=np.float32)
     
-    fx, fy = 572.4, 573.5
-    cx_orig, cy_orig = 325.2, 242.0
-    cx_crop = (cx_orig + pad_l - x1) * scale
-    cy_crop = (cy_orig + pad_t - y1) * scale
-    K_crop = np.array([
-        [fx * scale, 0, cx_crop],
-        [0, fy * scale, cy_crop],
+    # Use original K (consistent with datasets)
+    K = np.array([
+        [572.4, 0, 325.2],
+        [0, 573.5, 242.0],
         [0, 0, 1]
     ], dtype=np.float32)
     
-    # Return original K as well for geometric correction
-    K_orig = np.array([
-        [fx, 0, cx_orig],
-        [0, fy, cy_orig],
-        [0, 0, 1]
-    ], dtype=np.float32)
-    
-    return rgb_crop, depth_crop, bbox_center_crop, bbox_center_orig, K_crop, K_orig, pad_l, pad_t, x1, y1, size
+    return rgb_crop, depth_crop, bbox_center, K
 
 
-def run_inference(models, rgb_crop, depth_crop, bbox_center_crop, bbox_center_orig, K_crop, K_orig):
-    """Run inference with all models - NO corrections, raw predictions only."""
+def run_inference(models, rgb_crop, depth_crop, bbox_center, K):
+    """Run inference with all models using original coordinates."""
     predictions = {}
     
     transform = transforms.Compose([
@@ -175,8 +160,8 @@ def run_inference(models, rgb_crop, depth_crop, bbox_center_crop, bbox_center_or
     depth_tensor = torch.from_numpy(depth_normalized[..., np.newaxis]).permute(2, 0, 1).float().unsqueeze(0).to(DEVICE)
     depth_raw_tensor = torch.from_numpy(depth_meters).float().unsqueeze(0).to(DEVICE)
     
-    bbox_center_tensor = torch.from_numpy(bbox_center_crop).float().unsqueeze(0).to(DEVICE)
-    K_crop_tensor = torch.from_numpy(K_crop).float().unsqueeze(0).to(DEVICE)
+    bbox_center_tensor = torch.from_numpy(bbox_center).float().unsqueeze(0).to(DEVICE)
+    K_tensor = torch.from_numpy(K).float().unsqueeze(0).to(DEVICE)
     
     with torch.no_grad():
         for name, model in models.items():
@@ -184,16 +169,13 @@ def run_inference(models, rgb_crop, depth_crop, bbox_center_crop, bbox_center_or
                 if name == 'RGB':
                     pred_rot, pred_trans = model(rgb_tensor)
                 elif name == 'RGB-Geo':
-                    pred_rot, pred_trans = model(rgb_tensor, bbox_center_tensor, K_crop_tensor)
-                elif name == 'RGBD':
-                    pred_rot, pred_trans = model(rgb_tensor, depth_tensor)
+                    pred_rot, pred_trans = model(rgb_tensor, bbox_center_tensor, K_tensor)
                 elif name == 'RGBD-Geo':
-                    pred_rot, pred_trans = model(rgb_tensor, depth_tensor, depth_raw_tensor, bbox_center_tensor, K_crop_tensor)
+                    pred_rot, pred_trans = model(rgb_tensor, depth_tensor, depth_raw_tensor, bbox_center_tensor, K_tensor)
                 
                 pred_rot_np = pred_rot.cpu().numpy()[0]
                 pred_trans_np = pred_trans.cpu().numpy().flatten()
                 
-                # Use raw predictions - NO correction
                 predictions[name] = (pred_rot_np, pred_trans_np)
             except Exception as e:
                 print(f"{name} inference failed: {e}")
@@ -241,8 +223,8 @@ def visualize_comparison(num_samples=5):
             print(f"  Skipping - missing GT or corners")
             continue
         
-        rgb_crop, depth_crop, bbox_center_crop, bbox_center_orig, K_crop, K_orig, *_ = prepare_crop(rgb, depth, bbox)
-        predictions = run_inference(models, rgb_crop, depth_crop, bbox_center_crop, bbox_center_orig, K_crop, K_orig)
+        rgb_crop, depth_crop, bbox_center, K = prepare_crop(rgb, depth, bbox)
+        predictions = run_inference(models, rgb_crop, depth_crop, bbox_center, K)
         
         # Create figure for this sample - one row with GT + all models
         num_cols = len(models) + 1
