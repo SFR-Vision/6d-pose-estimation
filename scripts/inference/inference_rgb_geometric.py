@@ -35,24 +35,25 @@ CLASS_ID_TO_OBJ_NAME = {
 
 
 def load_ground_truth(obj_id_str, frame_id):
-    """Load ground truth pose from LineMOD dataset."""
+    """Load ground truth pose and bbox from LineMOD dataset."""
     gt_path = os.path.join(DATA_ROOT, obj_id_str, "gt.yml")
     if not os.path.exists(gt_path):
-        return None, None
+        return None, None, None
     
     with open(gt_path, 'r') as f:
         gts = yaml.safe_load(f)
     
     if frame_id not in gts:
-        return None, None
+        return None, None, None
     
     for anno in gts[frame_id]:
         if str(int(anno['obj_id'])).zfill(2) == obj_id_str:
             gt_rot = np.array(anno['cam_R_m2c']).reshape(3, 3)
             gt_trans = np.array(anno['cam_t_m2c']) / 1000.0  # mm to meters
-            return gt_rot, gt_trans
+            gt_bbox = anno.get('obj_bb', None)  # [x, y, w, h]
+            return gt_rot, gt_trans, gt_bbox
     
-    return None, None
+    return None, None, None
 
 
 def load_model_points(obj_id_str, num_points=500):
@@ -177,9 +178,9 @@ def run_inference(img_path):
     
     # Parse image filename to get GT info
     file_obj_id, frame_id = parse_image_filename(img_path)
-    gt_rot, gt_trans = None, None
+    gt_rot, gt_trans, gt_bbox = None, None, None
     if file_obj_id and frame_id:
-        gt_rot, gt_trans = load_ground_truth(file_obj_id, frame_id)
+        gt_rot, gt_trans, gt_bbox = load_ground_truth(file_obj_id, frame_id)
         if gt_rot is not None:
             print(f"Ground truth loaded for object {file_obj_id}, frame {frame_id}")
     
@@ -242,9 +243,16 @@ def run_inference(img_path):
         # Visualization (project_points handles quaternion conversion)
         corners = load_mesh_corners(MESH_DIR, obj_id_str)
         if corners is not None:
+            # Draw predicted 3D box (cyan, thick)
             box_2d = project_points(corners, pred_quat, pred_trans, K)
             draw_3d_box(viz_img, box_2d, (0, 255, 255), 2)
             draw_axes(viz_img, pred_quat, pred_trans, K, scale=0.1)
+            
+            # Draw ground truth 3D box (green, thin)
+            if gt_rot is not None and gt_trans is not None:
+                gt_quat = R.from_matrix(gt_rot).as_quat()  # Convert rotation matrix to quaternion
+                gt_box_2d = project_points(corners, gt_quat, gt_trans, K)
+                draw_3d_box(viz_img, gt_box_2d, (0, 255, 0), 1)  # Green, thin lines
             
             # Display label with ADD metric if available
             if metrics is not None:
@@ -265,10 +273,12 @@ def run_inference(img_path):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
     
     # Add legend
+    cv2.putText(viz_img, "Cyan=Predicted | Green=GroundTruth", 
+                (10, h_img - 75), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
     cv2.putText(viz_img, "Axes: X=Red(Front) | Y=Green(Left) | Z=Blue(Top)", 
-                (10, h_img - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                (10, h_img - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
     cv2.putText(viz_img, "ADD: Green<20mm | Yellow<50mm | Red>50mm", 
-                (10, h_img - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                (10, h_img - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
     
     plt.figure(figsize=(12, 10))
     plt.imshow(cv2.cvtColor(viz_img, cv2.COLOR_BGR2RGB))

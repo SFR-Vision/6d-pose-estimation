@@ -24,16 +24,16 @@ from models.add_loss import ADDLoss
 # Configuration
 DATA_ROOT = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "data")
 MODEL_DIR = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "models")
-WEIGHTS_DIR = os.path.join(PROJECT_ROOT, "weights_rgb_geometric")
-os.makedirs(WEIGHTS_DIR, exist_ok=True)
+SAVE_DIR = os.path.join(PROJECT_ROOT, "weights_rgb_geometric")
+os.makedirs(SAVE_DIR, exist_ok=True)
 
 BATCH_SIZE = 48
-EPOCHS = 75
+EPOCHS = 150
 LEARNING_RATE = 1e-4
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-CKPT_LAST = os.path.join(WEIGHTS_DIR, 'last_pose_model.pth')
-CKPT_BEST = os.path.join(WEIGHTS_DIR, 'best_pose_model.pth')
+CKPT_LAST = os.path.join(SAVE_DIR, 'last_pose_model.pth')
+CKPT_BEST = os.path.join(SAVE_DIR, 'best_pose_model.pth')
 
 
 def train():
@@ -53,19 +53,21 @@ def train():
     ])
 
     # Datasets
-    train_set = LineMODDatasetRGB(DATA_ROOT, mode='train', transform=train_transform, augment_bbox=False)
-    val_set = LineMODDatasetRGB(DATA_ROOT, mode='val', transform=val_transform, augment_bbox=False)
+    train_set = LineMODDatasetRGB(DATA_ROOT, mode='train', transform=train_transform)
+    val_set = LineMODDatasetRGB(DATA_ROOT, mode='val', transform=val_transform)
     
-    train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
-    val_loader = DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=False, num_workers=4, pin_memory=True, persistent_workers=True)
+    train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True,
+                                num_workers=4, pin_memory=True, persistent_workers=True)
+    val_loader = DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=False,
+                             num_workers=4, pin_memory=True, persistent_workers=True)
     print(f"Train: {len(train_set)}, Val: {len(val_set)} samples")
 
     # Model and optimizer
     model = PoseNetRGBGeometric(pretrained=True).to(DEVICE)
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=10, min_lr=1e-6)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
     
-    criterion = PoseLoss(rot_weight=2.0, trans_weight=5.0, rotation_loss='geodesic')
+    criterion = PoseLoss(rot_weight=0.6, trans_weight=1, rotation_loss='geodesic', z_only=True)
     eval_criterion = ADDLoss(MODEL_DIR, DEVICE)
 
     print(f"Model parameters: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
@@ -88,8 +90,14 @@ def train():
     else:
         print("Starting training from scratch")
 
-    # Training loop
-    history = {'train_loss': [], 'val_loss': [], 'val_add': [], 'val_acc': [], 'lr': []}
+    # Load existing history if resuming
+    history_path = os.path.join(SAVE_DIR, 'training_history.json')
+    if start_epoch > 0 and os.path.exists(history_path):
+        with open(history_path, 'r') as f:
+            history = json.load(f)
+        print(f"Loaded training history with {len(history['train_loss'])} epochs")
+    else:
+        history = {'train_loss': [], 'val_loss': [], 'val_add': [], 'val_acc': [], 'lr': []}
     
     for epoch in range(start_epoch, EPOCHS):
         model.train()
@@ -143,7 +151,7 @@ def train():
         val_add = val_add_sum / val_batches
         val_acc = val_acc_sum / val_batches
         
-        scheduler.step(val_acc)
+        scheduler.step()
         
         print(f"  Train: {avg_train_loss:.4f} | Val: {avg_val_loss:.4f} | ADD: {val_add:.1f}mm | ACC: {val_acc:.1f}% | LR: {optimizer.param_groups[0]['lr']:.2e}")
 
@@ -171,54 +179,14 @@ def train():
         history['lr'].append(optimizer.param_groups[0]['lr'])
 
     # Save history to JSON
-    history_path = os.path.join(WEIGHTS_DIR, 'training_history.json')
+    history_path = os.path.join(SAVE_DIR, 'training_history.json')
     with open(history_path, 'w') as f:
         json.dump(history, f, indent=2)
     print(f"Training history saved to {history_path}")
     
     # Plot training curves
-    if len(history['train_loss']) > 0:
-        fig, axes = plt.subplots(2, 2, figsize=(12, 8))
-        
-        # Loss plot
-        axes[0, 0].plot(history['train_loss'], label='Train Loss', color='blue')
-        axes[0, 0].plot(history['val_loss'], label='Val Loss', color='orange')
-        axes[0, 0].set_xlabel('Epoch')
-        axes[0, 0].set_ylabel('Loss')
-        axes[0, 0].set_title('Training vs Validation Loss')
-        axes[0, 0].legend()
-        axes[0, 0].grid(True)
-        
-        # ADD plot
-        axes[0, 1].plot(history['val_add'], label='Val ADD (mm)', color='green')
-        axes[0, 1].set_xlabel('Epoch')
-        axes[0, 1].set_ylabel('ADD (mm)')
-        axes[0, 1].set_title('Validation ADD Error')
-        axes[0, 1].legend()
-        axes[0, 1].grid(True)
-        
-        # Accuracy plot
-        axes[1, 0].plot(history['val_acc'], label='Val ACC (%)', color='red')
-        axes[1, 0].set_xlabel('Epoch')
-        axes[1, 0].set_ylabel('Accuracy (%)')
-        axes[1, 0].set_title('Validation ADD-2cm Accuracy')
-        axes[1, 0].legend()
-        axes[1, 0].grid(True)
-        
-        # Learning Rate plot
-        axes[1, 1].plot(history['lr'], label='Learning Rate', color='purple')
-        axes[1, 1].set_xlabel('Epoch')
-        axes[1, 1].set_ylabel('Learning Rate')
-        axes[1, 1].set_title('Learning Rate Schedule')
-        axes[1, 1].legend()
-        axes[1, 1].grid(True)
-        axes[1, 1].set_yscale('log')
-        
-        plt.tight_layout()
-        plot_path = os.path.join(WEIGHTS_DIR, 'training_curves.png')
-        plt.savefig(plot_path, dpi=150)
-        plt.close()
-        print(f"Training curves saved to {plot_path}")
+    from utils.training_plot import plot_training_curves
+    plot_training_curves(history, SAVE_DIR, model_name="RGB-Geometric")
 
     print(f"\nTraining complete. Best ADD-2cm: {best_acc:.2f}%")
 

@@ -16,12 +16,11 @@ class LineMODDatasetRGB(Dataset):
     Returns: rgb, quaternion, translation, obj_id, bbox_center, camera_matrix
     """
     
-    def __init__(self, root_dir, mode='train', transform=None, img_size=224, augment_bbox=True):
+    def __init__(self, root_dir, mode='train', transform=None, img_size=224):
         self.root_dir = root_dir
         self.mode = mode
         self.transform = transform
         self.img_size = img_size
-        self.augment_bbox = augment_bbox and (mode == 'train')
         self.all_data = []
         
         if not os.path.exists(root_dir):
@@ -92,22 +91,8 @@ class LineMODDatasetRGB(Dataset):
         gt_trans = np.array(item['cam_t_m2c'])
         
         # Bbox center for geometric computation
-        x_orig, y_orig, w_orig, h_orig = item['bbox']
-        bbox_center_gt = torch.tensor([x_orig + w_orig/2, y_orig + h_orig/2], dtype=torch.float32)
-
-        x, y, w, h = x_orig, y_orig, w_orig, h_orig
-
-        # Bbox augmentation (jitter for cropping)
-        if self.augment_bbox:
-            jitter_x = int(np.random.uniform(-0.15, 0.15) * w)
-            jitter_y = int(np.random.uniform(-0.15, 0.15) * h)
-            scale_w = int(np.random.uniform(-0.2, 0.2) * w)
-            scale_h = int(np.random.uniform(-0.2, 0.2) * h)
-            
-            x += jitter_x
-            y += jitter_y
-            w += scale_w
-            h += scale_h
+        x, y, w, h = item['bbox']
+        bbox_center_gt = torch.tensor([x + w/2, y + h/2], dtype=torch.float32)
         
         # Square crop with padding
         c_x, c_y = x + w/2, y + h/2

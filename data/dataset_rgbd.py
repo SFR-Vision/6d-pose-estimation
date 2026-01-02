@@ -16,12 +16,11 @@ class LineMODDatasetRGBD(Dataset):
     Returns: rgb, depth, depth_raw, quaternion, translation, obj_id, bbox_center, camera_matrix
     """
     
-    def __init__(self, root_dir, mode='train', transform=None, img_size=224, augment_bbox=True):
+    def __init__(self, root_dir, mode='train', transform=None, img_size=224):
         self.root_dir = root_dir
         self.mode = mode
         self.transform = transform
         self.img_size = img_size
-        self.augment_bbox = augment_bbox and (mode == 'train')
         self.all_data = []
         
         if not os.path.exists(root_dir):
@@ -101,21 +100,8 @@ class LineMODDatasetRGBD(Dataset):
         # Camera intrinsics
         cam_K = np.array(item['cam_K']).reshape(3, 3).astype(np.float32)
         
-        x_orig, y_orig, w_orig, h_orig = item['bbox']
-        bbox_center_gt = np.array([x_orig + w_orig/2, y_orig + h_orig/2], dtype=np.float32)
-        
-        x, y, w, h = x_orig, y_orig, w_orig, h_orig
-
-        # Bbox augmentation
-        if self.augment_bbox:
-            jitter_x = int(np.random.uniform(-0.05, 0.05) * w)
-            jitter_y = int(np.random.uniform(-0.05, 0.05) * h)
-            scale_w = int(np.random.uniform(-0.1, 0.1) * w)
-            scale_h = int(np.random.uniform(-0.1, 0.1) * h)
-            x += jitter_x
-            y += jitter_y
-            w += scale_w
-            h += scale_h
+        x, y, w, h = item['bbox']
+        bbox_center_gt = np.array([x + w/2, y + h/2], dtype=np.float32)
 
         # Square crop
         c_x, c_y = x + w/2, y + h/2

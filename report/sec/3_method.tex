@@ -1,0 +1,58 @@
+\section{Methodology}
+\label{sec:method}
+
+\subsection{Problem Formulation}
+Given an RGB image $I \in \mathbb{R}^{H \times W \times 3}$ containing a detected object with bounding box $\mathbf{b} = (x, y, w, h)$, our goal is to estimate the object's 6D pose $\mathbf{P} = (\mathbf{R}, \mathbf{t})$, where $\mathbf{R} \in SO(3)$ is the rotation matrix and $\mathbf{t} = (t_x, t_y, t_z)^T$ is the translation vector in the camera coordinate frame.
+
+\subsection{Network Architecture}
+Our architecture consists of three main components: a backbone feature extractor, a rotation head, and a geometric translation head.
+
+\subsubsection{Backbone}
+We use ResNet-18~\cite{he2016deep} pretrained on ImageNet as our feature extractor. The input is a $224 \times 224$ crop centered on the detected object. The backbone outputs a 512-dimensional feature vector after global average pooling.
+
+\subsubsection{Rotation Head}
+The rotation head predicts a unit quaternion $\mathbf{q} = (q_x, q_y, q_z, q_w)$ representing the object's orientation:
+\begin{equation}
+    \mathbf{q} = \text{normalize}(\text{FC}_{512 \rightarrow 4}(\mathbf{f}))
+\end{equation}
+where $\mathbf{f}$ is the backbone feature and normalization ensures $\|\mathbf{q}\| = 1$.
+
+\subsubsection{Geometric Translation Head}
+Rather than directly regressing 3D translation, we predict only the depth $t_z$ and derive $t_x, t_y$ geometrically from the bounding box center $(c_x, c_y)$ and camera intrinsics $\mathbf{K}$:
+\begin{equation}
+    t_z = \text{FC}_{512 \rightarrow 1}(\mathbf{f})
+\end{equation}
+\begin{equation}
+    t_x = \frac{(c_x - c_x^0) \cdot t_z}{f_x}, \quad t_y = \frac{(c_y - c_y^0) \cdot t_z}{f_y}
+\end{equation}
+where $(f_x, f_y)$ are focal lengths and $(c_x^0, c_y^0)$ is the principal point.
+
+This formulation leverages the geometric constraint that an object's image projection center corresponds to its 3D center projected through the camera model. The network only needs to learn the depth, while X and Y are geometrically derived.
+
+\subsection{Loss Function}
+We use a combined loss for rotation and translation:
+\begin{equation}
+    \mathcal{L} = \lambda_r \mathcal{L}_{rot} + \lambda_t \mathcal{L}_{trans}
+\end{equation}
+
+\subsubsection{Rotation Loss}
+We use geodesic distance on SO(3) for rotation:
+\begin{equation}
+    \mathcal{L}_{rot} = \arccos\left(\frac{\text{tr}(\mathbf{R}_{pred}^T \mathbf{R}_{gt}) - 1}{2}\right)
+\end{equation}
+
+\subsubsection{Translation Loss}
+We use smooth L1 loss for translation:
+\begin{equation}
+    \mathcal{L}_{trans} = \text{SmoothL1}(\mathbf{t}_{pred}, \mathbf{t}_{gt})
+\end{equation}
+
+\subsection{Evaluation Metric}
+We use the ADD (Average Distance of Model Points) metric~\cite{xiang2018posecnn}:
+\begin{equation}
+    \text{ADD} = \frac{1}{m}\sum_{i=1}^{m} \|(\mathbf{R}_{pred} \mathbf{p}_i + \mathbf{t}_{pred}) - (\mathbf{R}_{gt} \mathbf{p}_i + \mathbf{t}_{gt})\|
+\end{equation}
+where $\{\mathbf{p}_i\}_{i=1}^m$ are 3D model points. A pose is considered correct if ADD $<$ 2cm.
+
+\subsection{RGB-D Extension}
+As a bonus task, we extend our architecture to RGB-D inputs. The depth input is processed by a separate encoder branch, and features are fused with RGB features before the pose heads. This allows the network to leverage depth information for more accurate pose estimation.

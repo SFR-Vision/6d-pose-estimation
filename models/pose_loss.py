@@ -8,13 +8,20 @@ class PoseLoss(nn.Module):
     """
     Training loss for pose estimation.
     Computes rotation loss (geodesic or L1) and translation loss (L1).
+    
+    Args:
+        rot_weight: Weight for rotation loss
+        trans_weight: Weight for translation loss  
+        rotation_loss: 'geodesic' or 'l1'
+        z_only: If True, only supervise Z (for geometric models where X,Y are derived)
     """
     
-    def __init__(self, rot_weight=1.0, trans_weight=1.0, rotation_loss='geodesic'):
+    def __init__(self, rot_weight=1.0, trans_weight=1.0, rotation_loss='geodesic', z_only=False):
         super(PoseLoss, self).__init__()
         self.rot_weight = rot_weight
         self.trans_weight = trans_weight
         self.rotation_loss_type = rotation_loss
+        self.z_only = z_only
 
     def forward(self, pred_rot, pred_trans, gt_rot, gt_trans, obj_ids=None):
         """Compute combined rotation and translation loss."""
@@ -23,7 +30,14 @@ class PoseLoss(nn.Module):
         else:
             rot_loss = self._quaternion_l1(pred_rot, gt_rot)
         
-        trans_loss = torch.nn.functional.l1_loss(pred_trans, gt_trans)
+        if self.z_only:
+            # For geometric models: X,Y derived from Z via pinhole, only supervise Z
+            z_pred = pred_trans[:, 2]
+            z_gt = gt_trans[:, 2]
+            trans_loss = torch.nn.functional.l1_loss(z_pred, z_gt)
+        else:
+            # For non-geometric models: supervise full XYZ translation
+            trans_loss = torch.nn.functional.l1_loss(pred_trans, gt_trans)
         
         return (self.rot_weight * rot_loss) + (self.trans_weight * trans_loss)
     

@@ -111,11 +111,11 @@ def main():
     
     # Load datasets
     print("Loading datasets...")
-    rgb_dataset = LineMODDatasetRGB(DATA_ROOT, mode='val', transform=val_transform, augment_bbox=False)
+    rgb_dataset = LineMODDatasetRGB(DATA_ROOT, mode='val', transform=val_transform)
     rgb_loader = torch.utils.data.DataLoader(rgb_dataset, batch_size=16, shuffle=False, num_workers=4)
     
     try:
-        rgbd_dataset = LineMODDatasetRGBD(DATA_ROOT, mode='val', transform=val_transform, augment_bbox=False)
+        rgbd_dataset = LineMODDatasetRGBD(DATA_ROOT, mode='val', transform=val_transform)
         rgbd_loader = torch.utils.data.DataLoader(rgbd_dataset, batch_size=16, shuffle=False, num_workers=4)
     except:
         rgbd_loader = None

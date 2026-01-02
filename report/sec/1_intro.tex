@@ -1,0 +1,17 @@
+\section{Introduction}
+\label{sec:intro}
+
+Object pose estimation is a fundamental computer vision task that aims to determine the 6 degrees of freedom (6DoF) pose of an object, consisting of 3D rotation and 3D translation, relative to the camera frame. This capability is essential for numerous applications including robotic manipulation and augmented reality.
+
+The challenge of 6D pose estimation lies in accurately recovering both the object's orientation and its position in 3D space from 2D image observations. While the rotation can often be inferred from the object's appearance patterns, translation estimation---particularly depth (Z-coordinate)---remains challenging due to the inherent ambiguity in monocular images.
+
+Traditional approaches relied on hand-crafted features and template matching, which struggled with occlusion and appearance variations. Recent deep learning methods have achieved remarkable progress by learning discriminative features directly from data. However, many existing approaches treat the translation prediction as a pure regression problem, ignoring valuable geometric constraints available from the camera model.
+
+\textbf{Contributions.} In this work, we make the following contributions:
+\begin{itemize}
+    \item We propose an RGB-Geometric model that incorporates camera intrinsics and detection bounding box information to geometrically constrain translation prediction.
+    \item We demonstrate that predicting only the depth (Z) and deriving X, Y from geometry significantly outperforms direct 3D translation regression.
+    \item We provide comprehensive experiments on the LineMOD benchmark, analyzing per-object performance and the effect of data augmentation.
+    \item We extend our framework to RGB-D inputs as a bonus task, showing the architecture's flexibility.
+    \item We analyze the loss landscape using the methodology of Li \etal~\cite{visualloss}, providing insights into the optimization dynamics.
+\end{itemize}

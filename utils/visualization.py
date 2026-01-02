@@ -46,7 +46,7 @@ def draw_3d_box(img, pts_2d, color=(0, 255, 0), thickness=2):
     for s, e in edges:
         pt1 = (int(pts_2d[s][0]), int(pts_2d[s][1]))
         pt2 = (int(pts_2d[e][0]), int(pts_2d[e][1]))
-        cv2.line(img, pt1, pt2, color, thickness)
+        cv2.line(img, pt1, pt2, color, thickness, cv2.LINE_AA)
 
 
 def draw_axes(img, rotation, translation, K, scale=0.1):
@@ -65,6 +65,6 @@ def draw_axes(img, rotation, translation, K, scale=0.1):
     y_axis = project_points(np.array([[0, scale, 0]]), rotation, translation, K)[0]
     z_axis = project_points(np.array([[0, 0, scale]]), rotation, translation, K)[0]
     
-    cv2.line(img, tuple(origin), tuple(x_axis), (0, 0, 255), 3)  # X = Red
-    cv2.line(img, tuple(origin), tuple(y_axis), (0, 255, 0), 3)  # Y = Green
-    cv2.line(img, tuple(origin), tuple(z_axis), (255, 0, 0), 3)  # Z = Blue
+    cv2.line(img, tuple(origin), tuple(x_axis), (0, 0, 255), 3, cv2.LINE_AA)  # X = Red
+    cv2.line(img, tuple(origin), tuple(y_axis), (0, 255, 0), 3, cv2.LINE_AA)  # Y = Green
+    cv2.line(img, tuple(origin), tuple(z_axis), (255, 0, 0), 3, cv2.LINE_AA)  # Z = Blue

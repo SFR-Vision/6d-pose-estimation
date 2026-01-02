@@ -54,7 +54,12 @@ class PoseNetRGBDGeometric(nn.Module):
         return rotation, translation
     
     def _compute_pinhole_translation(self, depth_raw, bbox_center, camera_matrix):
-        """Compute X, Y, Z using pinhole camera model and depth sensor readings."""
+        """Compute X, Y, Z using pinhole camera model and depth sensor readings.
+        
+        Note: depth_raw is a 224x224 crop centered on the object.
+        So the object center is at crop pixel (112, 112).
+        bbox_center is in ORIGINAL image coordinates (for pinhole X,Y).
+        """
         batch_size = depth_raw.size(0)
         device = depth_raw.device
         
@@ -66,21 +71,31 @@ class PoseNetRGBDGeometric(nn.Module):
         cx = camera_matrix[:, 0, 2]
         cy = camera_matrix[:, 1, 2]
         
-        u_crop = bbox_center[:, 0].clamp(0, 223)
-        v_crop = bbox_center[:, 1].clamp(0, 223)
+        # Sample Z at CENTER of the crop (object center is at 112, 112 in crop)
+        # Use a small region around center for robustness
+        center = 112
+        region = 5  # 11x11 region
+        depth_region = depth_raw[:, center-region:center+region+1, center-region:center+region+1]
         
-        # Sample Z at bbox center
-        u_idx = u_crop.long().clamp(0, 223)
-        v_idx = v_crop.long().clamp(0, 223)
-        z = depth_raw[torch.arange(batch_size, device=device), v_idx, u_idx]
+        # Use median of valid depths (more robust than single pixel)
+        valid_mask = depth_region > 0.01
+        z_values = []
+        for i in range(batch_size):
+            valid_depths = depth_region[i][valid_mask[i]]
+            if len(valid_depths) > 0:
+                z_values.append(valid_depths.median())
+            else:
+                z_values.append(torch.tensor(0.5, device=device))
+        z = torch.stack(z_values)
         
-        # Handle zero/invalid depths
-        z = torch.where(z > 0.01, z, torch.tensor(0.5, device=device))
+        # Clamp to valid range
         z = torch.clamp(z, min=0.1, max=2.0)
         
-        # Apply pinhole equations
-        x = (u_crop - cx) * z / fx
-        y = (v_crop - cy) * z / fy
+        # Apply pinhole equations using ORIGINAL bbox_center coordinates
+        u_orig = bbox_center[:, 0]
+        v_orig = bbox_center[:, 1]
+        x = (u_orig - cx) * z / fx
+        y = (v_orig - cy) * z / fy
         
         return torch.stack([x, y, z], dim=1)
 

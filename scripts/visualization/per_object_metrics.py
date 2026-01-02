@@ -160,15 +160,15 @@ def main():
     
     # Load datasets
     print("Loading datasets...")
-    rgb_dataset = LineMODDatasetRGB(DATA_ROOT, mode='val', transform=val_transform, augment_bbox=False)
+    rgb_dataset = LineMODDatasetRGB(DATA_ROOT, mode='test', transform=val_transform)
     
     try:
-        rgbd_dataset = LineMODDatasetRGBD(DATA_ROOT, mode='val', transform=val_transform, augment_bbox=False)
+        rgbd_dataset = LineMODDatasetRGBD(DATA_ROOT, mode='test', transform=val_transform)
     except:
         rgbd_dataset = None
         print("  RGBD dataset not available")
     
-    print(f"  {len(rgb_dataset)} validation samples\n")
+    print(f"  {len(rgb_dataset)} test samples\n")
     
     # Load models
     print("Loading models...")
