@@ -7,28 +7,19 @@ import torch.nn as nn
 class PoseLoss(nn.Module):
     """
     Training loss for pose estimation.
-    Computes rotation loss (geodesic or L1) and translation loss (L1).
-    
-    Args:
-        rot_weight: Weight for rotation loss
-        trans_weight: Weight for translation loss  
-        rotation_loss: 'geodesic' or 'l1'
-        z_only: If True, only supervise Z (for geometric models where X,Y are derived)
+    Rotation: geodesic quaternion distance (always).
+    Translation: L1; optionally supervise only Z for geometric models.
     """
     
-    def __init__(self, rot_weight=1.0, trans_weight=1.0, rotation_loss='geodesic', z_only=False):
+    def __init__(self, rot_weight=1.0, trans_weight=1.0, z_only=False):
         super(PoseLoss, self).__init__()
         self.rot_weight = rot_weight
         self.trans_weight = trans_weight
-        self.rotation_loss_type = rotation_loss
         self.z_only = z_only
 
     def forward(self, pred_rot, pred_trans, gt_rot, gt_trans, obj_ids=None):
         """Compute combined rotation and translation loss."""
-        if self.rotation_loss_type == 'geodesic':
-            rot_loss = self._geodesic_distance(pred_rot, gt_rot)
-        else:
-            rot_loss = self._quaternion_l1(pred_rot, gt_rot)
+        rot_loss = self._geodesic_distance(pred_rot, gt_rot)
         
         if self.z_only:
             # For geometric models: X,Y derived from Z via pinhole, only supervise Z
@@ -62,17 +53,6 @@ class PoseLoss(nn.Module):
         
         angle = 2 * torch.atan2(diff_norm, sum_norm)
         return angle.mean()
-    
-    def _quaternion_l1(self, q1, q2):
-        """L1 distance between quaternions, accounting for double-cover."""
-        q1 = torch.nn.functional.normalize(q1, p=2, dim=1)
-        q2 = torch.nn.functional.normalize(q2, p=2, dim=1)
-        
-        dist_pos = torch.sum(torch.abs(q1 - q2), dim=1)
-        dist_neg = torch.sum(torch.abs(q1 + q2), dim=1)
-        dist = torch.min(dist_pos, dist_neg)
-        
-        return dist.mean()
     
     def train_loss(self, pred_rot, pred_trans, gt_rot, gt_trans, obj_ids=None):
         """Alias for forward()."""

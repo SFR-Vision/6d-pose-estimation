@@ -13,7 +13,7 @@ import torch
 from torchvision import transforms
 from tqdm import tqdm
 
-from data.dataset_rgb import LineMODDatasetRGB
+from data.dataset_rgb import LineMODDatasetRGB, LineMODDatasetRGBGeometric
 from data.dataset_rgbd import LineMODDatasetRGBD
 from models.add_loss import ADDLoss
 
@@ -92,24 +92,28 @@ def evaluate_per_object(model, model_name, dataset, add_loss, is_rgbd=False, nee
             sample = dataset[i]
             
             if is_rgbd:
-                rgb, depth, depth_raw, gt_rot, gt_trans, obj_id, bbox_center, cam_matrix = sample
+                rgb, depth, _depth_raw, z_sensor, gt_rot, gt_trans, obj_id, bbox_center, cam_matrix = sample
                 rgb = rgb.unsqueeze(0).to(DEVICE)
                 depth = depth.unsqueeze(0).to(DEVICE)
-                depth_raw = depth_raw.unsqueeze(0).to(DEVICE)
+                z_sensor = z_sensor.unsqueeze(0).to(DEVICE)
                 bbox_center = bbox_center.unsqueeze(0).to(DEVICE)
                 cam_matrix = cam_matrix.unsqueeze(0).to(DEVICE)
                 
                 if needs_geometry:
-                    pred_rot, pred_trans = model(rgb, depth, depth_raw, bbox_center, cam_matrix)
+                    pred_rot, pred_trans = model(rgb, depth, z_sensor, bbox_center, cam_matrix)
             else:
-                rgb, gt_rot, gt_trans, obj_id, bbox_center, cam_matrix = sample
-                rgb = rgb.unsqueeze(0).to(DEVICE)
-                bbox_center = bbox_center.unsqueeze(0).to(DEVICE)
-                cam_matrix = cam_matrix.unsqueeze(0).to(DEVICE)
-                
+                # Handle both RGB and RGB-Geometric datasets
                 if needs_geometry:
+                    # RGB-Geometric dataset returns 6 values
+                    rgb, gt_rot, gt_trans, obj_id, bbox_center, cam_matrix = sample
+                    rgb = rgb.unsqueeze(0).to(DEVICE)
+                    bbox_center = bbox_center.unsqueeze(0).to(DEVICE)
+                    cam_matrix = cam_matrix.unsqueeze(0).to(DEVICE)
                     pred_rot, pred_trans = model(rgb, bbox_center, cam_matrix)
                 else:
+                    # RGB dataset returns 4 values
+                    rgb, gt_rot, gt_trans, obj_id = sample
+                    rgb = rgb.unsqueeze(0).to(DEVICE)
                     pred_rot, pred_trans = model(rgb)
             
             obj_id_val = int(obj_id.item()) if hasattr(obj_id, 'item') else int(obj_id)
@@ -161,6 +165,7 @@ def main():
     # Load datasets
     print("Loading datasets...")
     rgb_dataset = LineMODDatasetRGB(DATA_ROOT, mode='test', transform=val_transform)
+    rgb_geo_dataset = LineMODDatasetRGBGeometric(DATA_ROOT, mode='test', transform=val_transform)
     
     try:
         rgbd_dataset = LineMODDatasetRGBD(DATA_ROOT, mode='test', transform=val_transform)
@@ -190,7 +195,7 @@ def main():
     
     if models['RGB-Geo'] is not None:
         all_results['RGB-Geo'] = evaluate_per_object(
-            models['RGB-Geo'], 'RGB-Geo', rgb_dataset, add_loss,
+            models['RGB-Geo'], 'RGB-Geo', rgb_geo_dataset, add_loss,
             is_rgbd=False, needs_geometry=True
         )
     

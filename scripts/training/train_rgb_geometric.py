@@ -16,7 +16,7 @@ from tqdm import tqdm
 import json
 import matplotlib.pyplot as plt
 
-from data.dataset_rgb import LineMODDatasetRGB
+from data.dataset_rgb import LineMODDatasetRGBGeometric
 from models.pose_net_rgb_geometric import PoseNetRGBGeometric
 from models.pose_loss import PoseLoss
 from models.add_loss import ADDLoss
@@ -27,8 +27,8 @@ MODEL_DIR = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "mode
 SAVE_DIR = os.path.join(PROJECT_ROOT, "weights_rgb_geometric")
 os.makedirs(SAVE_DIR, exist_ok=True)
 
-BATCH_SIZE = 48
-EPOCHS = 150
+BATCH_SIZE = 64
+EPOCHS = 75
 LEARNING_RATE = 1e-4
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -52,9 +52,9 @@ def train():
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
-    # Datasets
-    train_set = LineMODDatasetRGB(DATA_ROOT, mode='train', transform=train_transform)
-    val_set = LineMODDatasetRGB(DATA_ROOT, mode='val', transform=val_transform)
+    # Datasets - use LineMODDatasetRGBGeometric (returns 6 values: rgb, quat, trans, obj_id, bbox_center, cam_matrix)
+    train_set = LineMODDatasetRGBGeometric(DATA_ROOT, mode='train', transform=train_transform)
+    val_set = LineMODDatasetRGBGeometric(DATA_ROOT, mode='val', transform=val_transform)
     
     train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True,
                                 num_workers=4, pin_memory=True, persistent_workers=True)
@@ -67,7 +67,7 @@ def train():
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
     
-    criterion = PoseLoss(rot_weight=0.6, trans_weight=1, rotation_loss='geodesic', z_only=True)
+    criterion = PoseLoss(rot_weight=2, trans_weight=5, z_only=True)
     eval_criterion = ADDLoss(MODEL_DIR, DEVICE)
 
     print(f"Model parameters: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
@@ -95,9 +95,11 @@ def train():
     if start_epoch > 0 and os.path.exists(history_path):
         with open(history_path, 'r') as f:
             history = json.load(f)
+        # Backward-compatibility if old history lacks 2cm metric
+        history.setdefault('val_acc_2cm', [])
         print(f"Loaded training history with {len(history['train_loss'])} epochs")
     else:
-        history = {'train_loss': [], 'val_loss': [], 'val_add': [], 'val_acc': [], 'lr': []}
+        history = {'train_loss': [], 'val_loss': [], 'val_add': [], 'val_acc': [], 'val_acc_2cm': [], 'lr': []}
     
     for epoch in range(start_epoch, EPOCHS):
         model.train()
@@ -115,6 +117,7 @@ def train():
             pred_rot, pred_trans = model(rgb, bbox_center, cam_matrix)
             loss = criterion(pred_rot, pred_trans, gt_rot, gt_trans)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
 
             train_loss += loss.item()
@@ -126,7 +129,8 @@ def train():
         model.eval()
         val_loss_sum = 0.0
         val_add_sum = 0.0
-        val_acc_sum = 0.0
+        val_acc_2cm_sum = 0.0
+        val_acc_3cm_sum = 0.0
         val_batches = 0
         
         with torch.no_grad():
@@ -144,16 +148,18 @@ def train():
                 
                 metrics = eval_criterion.eval_metrics(pred_rot, pred_trans, gt_rot, gt_trans, obj_ids)
                 val_add_sum += metrics['add_mean']
-                val_acc_sum += metrics['add_2cm_acc']
+                val_acc_2cm_sum += metrics['add_2cm_acc']
+                val_acc_3cm_sum += metrics['add_3cm_acc']
                 val_batches += 1
         
         avg_val_loss = val_loss_sum / val_batches
         val_add = val_add_sum / val_batches
-        val_acc = val_acc_sum / val_batches
+        val_acc_2cm = val_acc_2cm_sum / val_batches
+        val_acc_3cm = val_acc_3cm_sum / val_batches
         
         scheduler.step()
         
-        print(f"  Train: {avg_train_loss:.4f} | Val: {avg_val_loss:.4f} | ADD: {val_add:.1f}mm | ACC: {val_acc:.1f}% | LR: {optimizer.param_groups[0]['lr']:.2e}")
+        print(f"  Train: {avg_train_loss:.4f} | Val: {avg_val_loss:.4f} | ADD: {val_add:.1f}mm | ACC@2cm: {val_acc_2cm:.1f}% | ACC@3cm: {val_acc_3cm:.1f}% | LR: {optimizer.param_groups[0]['lr']:.2e}")
 
         # Checkpointing
         ckpt = {
@@ -161,34 +167,37 @@ def train():
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'best_acc': best_acc,
-            'curr_acc': val_acc
+            'curr_acc_3cm': val_acc_3cm,
+            'curr_acc_2cm': val_acc_2cm
         }
         torch.save(ckpt, CKPT_LAST)
         
-        if val_acc > best_acc:
-            best_acc = val_acc
+        if val_acc_3cm > best_acc:
+            best_acc = val_acc_3cm
             ckpt['best_acc'] = best_acc
             torch.save(ckpt, CKPT_BEST)
-            print(f"  New best model saved (ADD-2cm: {best_acc:.2f}%)")
+            print(f"  New best model saved (ADD-3cm: {best_acc:.2f}%, ADD-2cm: {val_acc_2cm:.2f}%)")
         
         # Save history
         history['train_loss'].append(avg_train_loss)
         history['val_loss'].append(avg_val_loss)
         history['val_add'].append(val_add)
-        history['val_acc'].append(val_acc)
+        history['val_acc'].append(val_acc_3cm)
+        history['val_acc_2cm'].append(val_acc_2cm)
         history['lr'].append(optimizer.param_groups[0]['lr'])
+        
+        # Save history after each epoch
+        history_path = os.path.join(SAVE_DIR, 'training_history.json')
+        with open(history_path, 'w') as f:
+            json.dump(history, f, indent=2)
 
-    # Save history to JSON
-    history_path = os.path.join(SAVE_DIR, 'training_history.json')
-    with open(history_path, 'w') as f:
-        json.dump(history, f, indent=2)
     print(f"Training history saved to {history_path}")
     
     # Plot training curves
     from utils.training_plot import plot_training_curves
     plot_training_curves(history, SAVE_DIR, model_name="RGB-Geometric")
 
-    print(f"\nTraining complete. Best ADD-2cm: {best_acc:.2f}%")
+    print(f"\nTraining complete. Best ADD-3cm: {best_acc:.2f}%")
 
 
 if __name__ == '__main__':

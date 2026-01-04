@@ -29,7 +29,8 @@ def train_detector():
         print(f"Error: Could not find {DATA_YAML}")
         return
 
-    print(f"Training YOLOv8 on {torch.cuda.get_device_name(0)}")
+    device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
+    print(f"Training YOLOv8 on {device_name}")
 
     # Resume from checkpoint if available
     if os.path.exists(LAST_CKPT):
@@ -60,7 +61,7 @@ def train_detector():
 
     # Validation
     print("\nValidating model...")
-    metrics = model.val()
+    metrics = model.val(data=DATA_YAML)
     print(f"mAP@50: {metrics.box.map50:.4f}")
 
 

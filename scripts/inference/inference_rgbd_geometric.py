@@ -11,6 +11,8 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
+import yaml
+from scipy.spatial.transform import Rotation as R
 from torchvision import transforms
 from ultralytics import YOLO
 
@@ -18,17 +20,32 @@ from models.pose_net_rgbd_geometric import PoseNetRGBDGeometric
 from utils.mesh_utils import load_mesh_corners
 from utils.visualization import project_points, draw_3d_box, draw_axes
 from utils.camera import DEFAULT_K
+from utils.inference_utils import load_ground_truth, load_model_points, compute_add, parse_image_filename
 
 # Configuration
 YOLO_PATH = os.path.join(PROJECT_ROOT, "runs", "detect", "linemod_yolo", "weights", "best.pt")
 WEIGHTS_PATH = os.path.join(PROJECT_ROOT, "weights_rgbd_geometric", "best_pose_model.pth")
 MESH_DIR = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "models")
+DATA_ROOT = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "data")
 TEST_DIR = os.path.join(PROJECT_ROOT, "datasets", "yolo_ready", "images", "test")
 
 CLASS_ID_TO_OBJ_NAME = {
     0: "01", 1: "02", 2: "04", 3: "05", 4: "06", 5: "08",
     6: "09", 7: "10", 8: "11", 9: "12", 10: "13", 11: "14", 12: "15",
 }
+
+
+def put_text_with_outline(img, text, org, color, scale=0.55, thickness=1):
+    cv2.putText(img, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), thickness + 1, cv2.LINE_AA)
+    cv2.putText(img, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_AA)
+
+
+def draw_label_with_bg(img, text, x, y, color, scale=0.55, thickness=1):
+    (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
+    x = int(max(5, min(x, img.shape[1] - tw - 5)))
+    y = int(max(th + 5, min(y, img.shape[0] - 5)))
+    cv2.rectangle(img, (x - 3, y - th - 4), (x + tw + 3, y + 2), (0, 0, 0), -1)
+    cv2.putText(img, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_AA)
 
 
 def run_inference(img_path, depth_path=None):
@@ -90,6 +107,9 @@ def run_inference(img_path, depth_path=None):
         if depth_img.ndim == 3:
             depth_img = depth_img[:, :, 0]
     
+    # Precompute depth in meters for center sampling
+    depth_img_m = depth_img.astype(np.float32) / 1000.0
+
     # YOLO detection
     results = yolo(img_path, verbose=False)
     if not results[0].boxes:
@@ -97,6 +117,14 @@ def run_inference(img_path, depth_path=None):
         return
     
     print(f"YOLO detected {len(results[0].boxes)} objects")
+    
+    # Parse image filename to get GT info
+    file_obj_id, frame_id = parse_image_filename(img_path)
+    gt_rot, gt_trans = None, None
+    if file_obj_id and frame_id:
+        gt_rot, gt_trans = load_ground_truth(DATA_ROOT, file_obj_id, frame_id)
+        if gt_rot is not None:
+            print(f"Ground truth loaded for object {file_obj_id}, frame {frame_id}")
     
     transform = transforms.Compose([
         transforms.ToPILImage(),
@@ -150,38 +178,85 @@ def run_inference(img_path, depth_path=None):
         depth_normalized = np.clip((depth_meters - depth_min) / (depth_max - depth_min), 0, 1)
         depth_normalized[depth_meters < 0.01] = 0
         
+        # Sensor Z at bbox center (fallback to median crop depth if missing)
+        depth_at_center_m = 0.0
+        if 0 <= int(c_y_box) < depth_img_m.shape[0] and 0 <= int(c_x_box) < depth_img_m.shape[1]:
+            depth_at_center_m = float(depth_img_m[int(c_y_box), int(c_x_box)])
+        if depth_at_center_m <= 0:
+            valid_depths = depth_meters[depth_meters > 0]
+            if valid_depths.size > 0:
+                depth_at_center_m = float(np.median(valid_depths))
+        if depth_at_center_m <= 0:
+            depth_at_center_m = 0.6  # default fallback in meters
+
         # Prepare inputs
         input_rgb = transform(crop_rgb_resized).unsqueeze(0).to(device)
         # Depth normalized: add channel dim [1, 224, 224] -> [1, 1, 224, 224]
         input_depth = torch.tensor(depth_normalized[..., np.newaxis], dtype=torch.float32).permute(2, 0, 1).unsqueeze(0).to(device)
-        # Depth raw: [224, 224] -> [1, 224, 224]
-        input_depth_raw = torch.tensor(depth_meters, dtype=torch.float32).unsqueeze(0).to(device)
+        z_sensor = torch.tensor([depth_at_center_m], dtype=torch.float32).to(device)
         bbox_center = torch.from_numpy(bbox_center_orig).float().unsqueeze(0).to(device)
         cam_matrix = torch.tensor(K, dtype=torch.float32).unsqueeze(0).to(device)
         
         # Pose inference
         with torch.no_grad():
-            pred_quat, pred_trans = model(input_rgb, input_depth, input_depth_raw, bbox_center, cam_matrix)
+            pred_quat, pred_trans = model(input_rgb, input_depth, z_sensor, bbox_center, cam_matrix)
         
         pred_quat = pred_quat.cpu().numpy()[0]  # (4,)
         pred_trans = pred_trans.cpu().numpy().flatten()  # (3,)
         
-
+        # Compute ADD metric if ground truth is available
+        metrics = None
+        if gt_rot is not None and gt_trans is not None and obj_id_str == file_obj_id:
+            model_points = load_model_points(MESH_DIR, obj_id_str)
+            if model_points is not None:
+                metrics = compute_add(pred_quat, pred_trans, gt_rot, gt_trans, model_points)
+                xyz = metrics['trans_xyz_mm']
+                print(f"  Object {obj_id_str}:")
+                print(f"    ADD:         {metrics['add_mm']:.1f}mm")
+                print(f"    Trans Error: {metrics['trans_error_mm']:.1f}mm  (X:{xyz[0]:+.1f} Y:{xyz[1]:+.1f} Z:{xyz[2]:+.1f})")
+                print(f"    Rot Error:   {metrics['rot_error_deg']:.1f}°")
+                print(f"    Pred Trans:  [{metrics['pred_trans'][0]:.3f}, {metrics['pred_trans'][1]:.3f}, {metrics['pred_trans'][2]:.3f}] m")
+                print(f"    GT Trans:    [{metrics['gt_trans'][0]:.3f}, {metrics['gt_trans'][1]:.3f}, {metrics['gt_trans'][2]:.3f}] m")
+        
         # Visualization using ORIGINAL camera matrix K (not crop)
         corners = load_mesh_corners(MESH_DIR, obj_id_str)
         if corners is not None:
+            # Draw predicted 3D box (cyan, thick)
             box_2d = project_points(corners, pred_quat, pred_trans, K)
-            draw_3d_box(viz_img, box_2d, (255, 255, 0), 2)
+            draw_3d_box(viz_img, box_2d, (0, 255, 255), 2)
             draw_axes(viz_img, pred_quat, pred_trans, K, scale=0.1)
             
-            cv2.putText(viz_img, f"{obj_id_str} ({conf:.2f})", (x1, y1 - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
+            # Draw ground truth 3D box (green, thin)
+            if gt_rot is not None and gt_trans is not None:
+                gt_quat = R.from_matrix(gt_rot).as_quat()  # Convert rotation matrix to quaternion
+                gt_box_2d = project_points(corners, gt_quat, gt_trans, K)
+                draw_3d_box(viz_img, gt_box_2d, (0, 255, 0), 1)  # Green, thin lines
+            
+            # Display label with ADD metric if available
+            if metrics is not None:
+                add_mm = metrics['add_mm']
+                label = f"{obj_id_str} ADD:{add_mm:.0f}mm T:{metrics['trans_error_mm']:.0f}mm R:{metrics['rot_error_deg']:.0f}deg"
+                # Color based on accuracy: green if < 20mm, yellow if < 50mm, red otherwise
+                if add_mm < 20:
+                    color = (0, 255, 0)  # Green - excellent
+                elif add_mm < 50:
+                    color = (0, 255, 255)  # Yellow - good
+                else:
+                    color = (0, 0, 255)  # Red - poor
+            else:
+                label = f"{obj_id_str} ({conf:.2f})"
+                color = (0, 255, 255)
+            
+            # Draw label for this detection
+            draw_label_with_bg(viz_img, label, x1, max(25, y1 - 10), color, scale=0.55, thickness=1)
     
-    # Add legend
-    cv2.putText(viz_img, "Axes: X=Red(Front) | Y=Green(Left) | Z=Blue(Top)", 
-                (10, h_img - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-    cv2.putText(viz_img, "Cyan Box = 3D Pose Estimation", 
-                (10, h_img - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+    # Add legend (outside the detection loop)
+    put_text_with_outline(viz_img, "Cyan=Predicted | Green=GroundTruth", 
+                          (10, h_img - 70), (255, 255, 255), scale=0.6, thickness=2)
+    put_text_with_outline(viz_img, "Axes: X=Red(Front) | Y=Green(Left) | Z=Blue(Top)", 
+                          (10, h_img - 45), (255, 255, 255), scale=0.6, thickness=2)
+    put_text_with_outline(viz_img, "ADD: Green - Excellent | Yellow - Good | Red - Poor", 
+                          (10, h_img - 20), (0, 255, 255), scale=0.6, thickness=2)
     
     plt.figure(figsize=(12, 10))
     plt.imshow(cv2.cvtColor(viz_img, cv2.COLOR_BGR2RGB))

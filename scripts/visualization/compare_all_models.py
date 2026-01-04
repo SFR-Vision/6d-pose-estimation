@@ -13,7 +13,7 @@ import torch
 from torchvision import transforms
 from tqdm import tqdm
 
-from data.dataset_rgb import LineMODDatasetRGB
+from data.dataset_rgb import LineMODDatasetRGB, LineMODDatasetRGBGeometric
 from data.dataset_rgbd import LineMODDatasetRGBD
 from models.add_loss import ADDLoss
 
@@ -69,21 +69,25 @@ def evaluate_model(model, model_name, loader, criterion, is_rgbd=False, needs_ge
     with torch.no_grad():
         for batch in tqdm(loader, desc=f"Evaluating {model_name}", leave=False):
             if is_rgbd:
-                rgb, depth, depth_raw, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix = batch
-                rgb, depth, depth_raw = rgb.to(DEVICE), depth.to(DEVICE), depth_raw.to(DEVICE)
+                rgb, depth, depth_raw, z_sensor, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix = batch
+                rgb, depth, z_sensor = rgb.to(DEVICE), depth.to(DEVICE), z_sensor.to(DEVICE)
                 gt_rot, gt_trans, obj_ids = gt_rot.to(DEVICE), gt_trans.to(DEVICE), obj_ids.to(DEVICE)
                 bbox_center, cam_matrix = bbox_center.to(DEVICE), cam_matrix.to(DEVICE)
                 
                 if 'Geometric' in model_name:
-                    pred_rot, pred_trans = model(rgb, depth, depth_raw, bbox_center, cam_matrix)
+                    pred_rot, pred_trans = model(rgb, depth, z_sensor, bbox_center, cam_matrix)
             else:
-                rgb, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix = batch
-                rgb, gt_rot, gt_trans, obj_ids = rgb.to(DEVICE), gt_rot.to(DEVICE), gt_trans.to(DEVICE), obj_ids.to(DEVICE)
-                bbox_center, cam_matrix = bbox_center.to(DEVICE), cam_matrix.to(DEVICE)
-                
+                # Handle both RGB and RGB-Geometric models
                 if needs_geometry:
+                    # RGB-Geometric: returns (rgb, quat, trans, obj_id, bbox_center, cam_matrix)
+                    rgb, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix = batch
+                    rgb, gt_rot, gt_trans, obj_ids = rgb.to(DEVICE), gt_rot.to(DEVICE), gt_trans.to(DEVICE), obj_ids.to(DEVICE)
+                    bbox_center, cam_matrix = bbox_center.to(DEVICE), cam_matrix.to(DEVICE)
                     pred_rot, pred_trans = model(rgb, bbox_center, cam_matrix)
                 else:
+                    # RGB: returns (rgb, quat, trans, obj_id)
+                    rgb, gt_rot, gt_trans, obj_ids = batch
+                    rgb, gt_rot, gt_trans, obj_ids = rgb.to(DEVICE), gt_rot.to(DEVICE), gt_trans.to(DEVICE), obj_ids.to(DEVICE)
                     pred_rot, pred_trans = model(rgb)
             
             metrics = criterion.eval_metrics(pred_rot, pred_trans, gt_rot, gt_trans, obj_ids)
@@ -109,13 +113,16 @@ def main():
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     
-    # Load datasets
+    # Load datasets (always use test split for comparisons)
     print("Loading datasets...")
-    rgb_dataset = LineMODDatasetRGB(DATA_ROOT, mode='val', transform=val_transform)
+    rgb_dataset = LineMODDatasetRGB(DATA_ROOT, mode='test', transform=val_transform)
     rgb_loader = torch.utils.data.DataLoader(rgb_dataset, batch_size=16, shuffle=False, num_workers=4)
     
+    rgb_geo_dataset = LineMODDatasetRGBGeometric(DATA_ROOT, mode='test', transform=val_transform)
+    rgb_geo_loader = torch.utils.data.DataLoader(rgb_geo_dataset, batch_size=16, shuffle=False, num_workers=4)
+    
     try:
-        rgbd_dataset = LineMODDatasetRGBD(DATA_ROOT, mode='val', transform=val_transform)
+        rgbd_dataset = LineMODDatasetRGBD(DATA_ROOT, mode='test', transform=val_transform)
         rgbd_loader = torch.utils.data.DataLoader(rgbd_dataset, batch_size=16, shuffle=False, num_workers=4)
     except:
         rgbd_loader = None
@@ -139,7 +146,7 @@ def main():
                                          is_rgbd=False, needs_geometry=False)
     
     if models['RGB-Geometric'] is not None:
-        results['RGB-Geometric'] = evaluate_model(models['RGB-Geometric'], 'RGB-Geometric', rgb_loader, criterion,
+        results['RGB-Geometric'] = evaluate_model(models['RGB-Geometric'], 'RGB-Geometric', rgb_geo_loader, criterion,
                                                    is_rgbd=False, needs_geometry=True)
     
     if rgbd_loader is not None:

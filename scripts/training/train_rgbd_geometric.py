@@ -27,8 +27,8 @@ MODEL_DIR = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "mode
 SAVE_DIR = os.path.join(PROJECT_ROOT, "weights_rgbd_geometric")
 os.makedirs(SAVE_DIR, exist_ok=True)
 
-BATCH_SIZE = 48
-EPOCHS = 150
+BATCH_SIZE = 32
+EPOCHS = 75
 LEARNING_RATE = 1e-4
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -67,7 +67,7 @@ def train():
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
     
-    criterion = PoseLoss(rot_weight=1.0, trans_weight=0, rotation_loss='geodesic')  # No trans loss - Z from sensor
+    criterion = PoseLoss(rot_weight=2, trans_weight=5, z_only=True)  # Learn Z offset
     eval_criterion = ADDLoss(MODEL_DIR, DEVICE)
 
     print(f"Model parameters: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
@@ -104,19 +104,20 @@ def train():
         train_loss = 0.0
         
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS}")
-        for rgb, depth, depth_raw, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix in pbar:
+        for rgb, depth, depth_raw, z_sensor, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix in pbar:
             rgb = rgb.to(DEVICE)
             depth = depth.to(DEVICE)
-            depth_raw = depth_raw.to(DEVICE)
+            z_sensor = z_sensor.to(DEVICE)
             gt_rot = gt_rot.to(DEVICE)
             gt_trans = gt_trans.to(DEVICE)
             bbox_center = bbox_center.to(DEVICE)
             cam_matrix = cam_matrix.to(DEVICE)
 
             optimizer.zero_grad()
-            pred_rot, pred_trans = model(rgb, depth, depth_raw, bbox_center, cam_matrix)
+            pred_rot, pred_trans = model(rgb, depth, z_sensor, bbox_center, cam_matrix)
             loss = criterion(pred_rot, pred_trans, gt_rot, gt_trans)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
 
             train_loss += loss.item()
@@ -132,67 +133,86 @@ def train():
         val_batches = 0
         
         with torch.no_grad():
-            for rgb, depth, depth_raw, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix in val_loader:
+            for rgb, depth, depth_raw, z_sensor, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix in val_loader:
                 rgb = rgb.to(DEVICE)
                 depth = depth.to(DEVICE)
-                depth_raw = depth_raw.to(DEVICE)
+                z_sensor = z_sensor.to(DEVICE)
                 gt_rot = gt_rot.to(DEVICE)
                 gt_trans = gt_trans.to(DEVICE)
                 bbox_center = bbox_center.to(DEVICE)
                 cam_matrix = cam_matrix.to(DEVICE)
 
-                pred_rot, pred_trans = model(rgb, depth, depth_raw, bbox_center, cam_matrix)
+                pred_rot, pred_trans = model(rgb, depth, z_sensor, bbox_center, cam_matrix)
                 
                 val_loss = criterion(pred_rot, pred_trans, gt_rot, gt_trans)
                 val_loss_sum += val_loss.item()
                 
                 metrics = eval_criterion.eval_metrics(pred_rot, pred_trans, gt_rot, gt_trans, obj_ids)
                 val_add_sum += metrics['add_mean']
-                val_acc_sum += metrics['add_2cm_acc']
+                val_acc_sum += metrics['add_3cm_acc']  # Use 3cm for best model
                 val_batches += 1
         
         avg_val_loss = val_loss_sum / val_batches
         val_add = val_add_sum / val_batches
-        val_acc = val_acc_sum / val_batches
+        val_acc_3cm = val_acc_sum / val_batches
+        
+        # Also compute 2cm for comparison
+        val_acc_2cm_sum = 0.0
+        with torch.no_grad():
+            for rgb, depth, depth_raw, z_sensor, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix in val_loader:
+                rgb = rgb.to(DEVICE)
+                depth = depth.to(DEVICE)
+                z_sensor = z_sensor.to(DEVICE)
+                gt_rot = gt_rot.to(DEVICE)
+                gt_trans = gt_trans.to(DEVICE)
+                bbox_center = bbox_center.to(DEVICE)
+                cam_matrix = cam_matrix.to(DEVICE)
+                pred_rot, pred_trans = model(rgb, depth, z_sensor, bbox_center, cam_matrix)
+                metrics = eval_criterion.eval_metrics(pred_rot, pred_trans, gt_rot, gt_trans, obj_ids)
+                val_acc_2cm_sum += metrics['add_2cm_acc']
+        val_acc_2cm = val_acc_2cm_sum / val_batches
         
         scheduler.step()
         
-        print(f"  Train: {avg_train_loss:.4f} | Val: {avg_val_loss:.4f} | ADD: {val_add:.1f}mm | ACC: {val_acc:.1f}% | LR: {optimizer.param_groups[0]['lr']:.2e}")
+        print(f"  Train: {avg_train_loss:.4f} | Val: {avg_val_loss:.4f} | ADD: {val_add:.1f}mm | ACC@2cm: {val_acc_2cm:.1f}% | ACC@3cm: {val_acc_3cm:.1f}% | LR: {optimizer.param_groups[0]['lr']:.2e}")
 
-        # Checkpointing
+        # Checkpointing (use 3cm threshold to prevent plateau)
         ckpt = {
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'best_acc': best_acc,
-            'curr_acc': val_acc
+            'curr_acc_3cm': val_acc_3cm,
+            'curr_acc_2cm': val_acc_2cm
         }
         torch.save(ckpt, CKPT_LAST)
         
-        if val_acc > best_acc:
-            best_acc = val_acc
+        if val_acc_3cm > best_acc:
+            best_acc = val_acc_3cm
             ckpt['best_acc'] = best_acc
             torch.save(ckpt, CKPT_BEST)
-            print(f"  New best model saved (ADD-2cm: {best_acc:.2f}%)")
+            print(f"  New best model saved (ADD-3cm: {best_acc:.2f}%, ADD-2cm: {val_acc_2cm:.2f}%)")
         
         # Save history
         history['train_loss'].append(avg_train_loss)
         history['val_loss'].append(avg_val_loss)
         history['val_add'].append(val_add)
-        history['val_acc'].append(val_acc)
+        history['val_acc'].append(val_acc_3cm)  # Primary metric
+        history.setdefault('val_acc_2cm', []).append(val_acc_2cm)  # For comparison
         history['lr'].append(optimizer.param_groups[0]['lr'])
+        
+        # Save history after each epoch
+        history_path = os.path.join(SAVE_DIR, 'training_history.json')
+        with open(history_path, 'w') as f:
+            json.dump(history, f, indent=2)
 
-    # Save history to JSON
-    history_path = os.path.join(SAVE_DIR, 'training_history.json')
-    with open(history_path, 'w') as f:
-        json.dump(history, f, indent=2)
     print(f"Training history saved to {history_path}")
     
     # Plot training curves
     from utils.training_plot import plot_training_curves
     plot_training_curves(history, SAVE_DIR, model_name="RGBD-Geometric")
 
-    print(f"\nTraining complete. Best ADD-2cm: {best_acc:.2f}%")
+    print(f"\nTraining complete. Best ADD-3cm: {best_acc:.2f}%")
 
 
 if __name__ == "__main__":

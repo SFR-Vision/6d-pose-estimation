@@ -13,16 +13,22 @@ def project_points(points_3d, rotation, translation, K):
         points_3d: numpy array of shape (N, 3)
         rotation: quaternion (4,) or rotation matrix (3, 3)
         translation: numpy array of shape (3,)
-        K: camera intrinsic matrix (3, 3)
+        K: camera intrinsic matrix (3, 3) or numpy array
     
     Returns:
         numpy array of shape (N, 2) with 2D pixel coordinates
     """
+    # Convert rotation to matrix if quaternion
     if rotation.shape == (4,):
         r_mat = R.from_quat(rotation).as_matrix()
     else:
         r_mat = rotation
     
+    # Ensure K is numpy array
+    if not isinstance(K, np.ndarray):
+        K = np.array(K)
+    
+    # Transform points to camera frame
     p_cam = (r_mat @ points_3d.T).T + translation
     z = np.clip(p_cam[:, 2], 0.001, None)
     

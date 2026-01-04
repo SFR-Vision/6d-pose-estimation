@@ -39,7 +39,7 @@ import h5py
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, PROJECT_ROOT)
 
-from data.dataset_rgb import LineMODDatasetRGB
+from data.dataset_rgb import LineMODDatasetRGB, LineMODDatasetRGBGeometric
 from data.dataset_rgbd import LineMODDatasetRGBD
 from models.pose_net_rgb_geometric import PoseNetRGBGeometric
 from models.pose_net_rgb import PoseNetRGB
@@ -69,7 +69,7 @@ def get_model_and_loader(model_type):
     elif model_type == 'rgb_geometric':
         model = PoseNetRGBGeometric(pretrained=False)
         weights_dir = os.path.join(PROJECT_ROOT, "weights_rgb_geometric")
-        dataset = LineMODDatasetRGB(DATA_ROOT, mode='train', transform=transform)
+        dataset = LineMODDatasetRGBGeometric(DATA_ROOT, mode='train', transform=transform)
         is_rgbd = False
     elif model_type == 'rgbd_geometric':
         model = PoseNetRGBDGeometric(pretrained=False)
@@ -276,7 +276,7 @@ def create_loss_landscape(model_type, grid_size=25, range_val=1.0, sample_ratio=
     direction2 = [d.to(DEVICE) for d in direction2]
     
     # Loss criterion (same as training)
-    criterion = PoseLoss(rot_weight=2.0, trans_weight=5.0, rotation_loss='geodesic')
+    criterion = PoseLoss(rot_weight=2.0, trans_weight=5.0)
     
     # Create grid
     alphas = np.linspace(-range_val, range_val, grid_size)

@@ -32,18 +32,20 @@ def download_pretrained_weights():
         import gdown
     
     # Check if weights already exist
-    weights_exist = (
-        os.path.exists("weights_rgb/best_pose_model.pth") and 
-        os.path.exists("weights_hybrid/best_pose_model.pth") and
-        os.path.exists("runs/detect/linemod_yolo/weights/best.pt")
-    )
+        weights_exist = (
+            os.path.exists("weights_rgb/best_pose_model.pth") and
+            os.path.exists("weights_rgb_geometric/best_pose_model.pth") and
+            os.path.exists("weights_rgbd_geometric/best_pose_model.pth") and
+            os.path.exists("runs/detect/linemod_yolo/weights/best.pt")
+        )
     
-    if weights_exist:
-        print("✅ Pre-trained weights already exist!")
-        print("   - RGB model: weights_rgb/best_pose_model.pth")
-        print("   - Hybrid model: weights_hybrid/best_pose_model.pth")
-        print("   - YOLO detector: runs/detect/linemod_yolo/weights/best.pt")
-        return True
+        if weights_exist:
+            print("✅ Pre-trained weights already exist!")
+            print("   - RGB model: weights_rgb/best_pose_model.pth")
+            print("   - RGB-Geometric model: weights_rgb_geometric/best_pose_model.pth")
+            print("   - RGBD-Geometric model: weights_rgbd_geometric/best_pose_model.pth")
+            print("   - YOLO detector: runs/detect/linemod_yolo/weights/best.pt")
+            return True
     
     print("⬇️  Downloading pre-trained weights from Google Drive...")
     
@@ -85,7 +87,13 @@ def download_pretrained_weights():
             if os.path.exists(parent):
                 print(f"   Moving files from {parent}/ to root...")
                 # Move weights directories
-                for item in ["weights_rgb", "weights_hybrid", "yolo_weights", "runs"]:
+                for item in [
+                    "weights_rgb",
+                    "weights_rgb_geometric",
+                    "weights_rgbd_geometric",
+                    "yolo_weights",
+                    "runs",
+                ]:
                     src = os.path.join(parent, item)
                     if os.path.exists(src):
                         if os.path.exists(item):
@@ -105,15 +113,18 @@ def download_pretrained_weights():
         os.remove(output_zip)
         print("✅ Pre-trained weights loaded successfully!")
         print("   - RGB model: weights_rgb/best_pose_model.pth")
-        print("   - Hybrid model: weights_hybrid/best_pose_model.pth")
+        print("   - RGB-Geometric model: weights_rgb_geometric/best_pose_model.pth")
+        print("   - RGBD-Geometric model: weights_rgbd_geometric/best_pose_model.pth")
         print("   - YOLO detector: runs/detect/linemod_yolo/weights/best.pt")
         
         # Verify all files exist
         missing = []
         if not os.path.exists("weights_rgb/best_pose_model.pth"):
             missing.append("RGB weights")
-        if not os.path.exists("weights_hybrid/best_pose_model.pth"):
-            missing.append("Hybrid weights")
+        if not os.path.exists("weights_rgb_geometric/best_pose_model.pth"):
+            missing.append("RGB-Geometric weights")
+        if not os.path.exists("weights_rgbd_geometric/best_pose_model.pth"):
+            missing.append("RGBD-Geometric weights")
         if not os.path.exists("runs/detect/linemod_yolo/weights/best.pt"):
             missing.append("YOLO weights")
         

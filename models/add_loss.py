@@ -164,6 +164,7 @@ class ADDLoss(nn.Module):
         add_distances = []
         add_s_distances = []
         add_2cm_correct = []
+        add_3cm_correct = []
         
         for i in range(batch_size):
             oid = int(obj_ids[i].item())
@@ -193,11 +194,15 @@ class ADDLoss(nn.Module):
             is_symmetric = oid in SYMMETRIC_OBJECT_IDS
             effective_dist = add_s_dist if is_symmetric else add_dist
             add_2cm_correct.append(1.0 if effective_dist.item() < threshold else 0.0)
+            
+            # ADD-3cm (constant 3cm threshold for training progress)
+            add_3cm_correct.append(1.0 if effective_dist.item() < 0.03 else 0.0)
         
         return {
             'add_mean': np.mean(add_distances) * 1000 if add_distances else 0,
             'add_s_mean': np.mean(add_s_distances) * 1000 if add_s_distances else 0,
             'add_2cm_acc': np.mean(add_2cm_correct) * 100 if add_2cm_correct else 0,
+            'add_3cm_acc': np.mean(add_3cm_correct) * 100 if add_3cm_correct else 0,
         }
 
     def _quat_to_mat(self, q):

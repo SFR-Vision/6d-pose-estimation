@@ -20,6 +20,7 @@ from models.pose_net_rgb_geometric import PoseNetRGBGeometric
 from utils.mesh_utils import load_mesh_corners
 from utils.visualization import project_points, draw_3d_box, draw_axes
 from utils.camera import DEFAULT_K
+from utils.inference_utils import load_ground_truth, load_model_points, compute_add, parse_image_filename
 
 # Configuration
 YOLO_PATH = os.path.join(PROJECT_ROOT, "runs", "detect", "linemod_yolo", "weights", "best.pt")
@@ -34,107 +35,17 @@ CLASS_ID_TO_OBJ_NAME = {
 }
 
 
-def load_ground_truth(obj_id_str, frame_id):
-    """Load ground truth pose and bbox from LineMOD dataset."""
-    gt_path = os.path.join(DATA_ROOT, obj_id_str, "gt.yml")
-    if not os.path.exists(gt_path):
-        return None, None, None
-    
-    with open(gt_path, 'r') as f:
-        gts = yaml.safe_load(f)
-    
-    if frame_id not in gts:
-        return None, None, None
-    
-    for anno in gts[frame_id]:
-        if str(int(anno['obj_id'])).zfill(2) == obj_id_str:
-            gt_rot = np.array(anno['cam_R_m2c']).reshape(3, 3)
-            gt_trans = np.array(anno['cam_t_m2c']) / 1000.0  # mm to meters
-            gt_bbox = anno.get('obj_bb', None)  # [x, y, w, h]
-            return gt_rot, gt_trans, gt_bbox
-    
-    return None, None, None
+def put_text_with_outline(img, text, org, color, scale=0.55, thickness=1):
+    cv2.putText(img, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), thickness + 1, cv2.LINE_AA)
+    cv2.putText(img, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_AA)
 
 
-def load_model_points(obj_id_str, num_points=500):
-    """Load 3D model points for ADD computation."""
-    ply_path = os.path.join(MESH_DIR, f"obj_{obj_id_str}.ply")
-    if not os.path.exists(ply_path):
-        return None
-    
-    verts = []
-    with open(ply_path, 'r') as f:
-        lines = f.readlines()
-    
-    header_end = False
-    for line in lines:
-        if "end_header" in line:
-            header_end = True
-            continue
-        if header_end:
-            vals = line.strip().split()
-            if len(vals) >= 3:
-                verts.append([float(vals[0]), float(vals[1]), float(vals[2])])
-    
-    pts = np.array(verts) / 1000.0  # mm to meters
-    
-    # Filter outliers and downsample
-    distances = np.linalg.norm(pts, axis=1)
-    pts = pts[distances < 0.5]
-    
-    if len(pts) > num_points:
-        idx = np.random.choice(len(pts), num_points, replace=False)
-        pts = pts[idx]
-    
-    return pts
-
-
-def compute_add(pred_quat, pred_trans, gt_rot, gt_trans, model_points):
-    """Compute ADD (Average Distance of Model Points) and error breakdown.
-    
-    Returns:
-        dict with 'add_mm', 'trans_error_mm', 'rot_error_deg', 'trans_xyz_mm'
-    """
-    # Convert quaternion to rotation matrix
-    pred_R = R.from_quat([pred_quat[0], pred_quat[1], pred_quat[2], pred_quat[3]]).as_matrix()
-    
-    # Translation error breakdown (X, Y, Z in mm)
-    trans_diff = (pred_trans - gt_trans) * 1000  # to mm
-    trans_error = np.linalg.norm(trans_diff)
-    
-    # Rotation error (geodesic angle in degrees)
-    R_diff = pred_R @ gt_rot.T
-    trace = np.trace(R_diff)
-    cos_angle = np.clip((trace - 1) / 2, -1.0, 1.0)
-    rot_error_rad = np.arccos(cos_angle)
-    rot_error_deg = np.degrees(rot_error_rad)
-    
-    # Transform model points
-    gt_points = model_points @ gt_rot.T + gt_trans
-    pred_points = model_points @ pred_R.T + pred_trans
-    
-    # Compute ADD
-    add_dist = np.linalg.norm(pred_points - gt_points, axis=1).mean() * 1000
-    
-    return {
-        'add_mm': add_dist,
-        'trans_error_mm': trans_error,
-        'trans_xyz_mm': trans_diff,  # [X, Y, Z] errors
-        'rot_error_deg': rot_error_deg,
-        'pred_trans': pred_trans,
-        'gt_trans': gt_trans
-    }
-
-
-def parse_image_filename(img_path):
-    """Parse object ID and frame ID from test image filename (e.g., '01_0219.png')."""
-    filename = os.path.basename(img_path)
-    parts = filename.replace('.png', '').replace('.jpg', '').split('_')
-    if len(parts) >= 2:
-        obj_id_str = parts[0]
-        frame_id = int(parts[1])
-        return obj_id_str, frame_id
-    return None, None
+def draw_label_with_bg(img, text, x, y, color, scale=0.55, thickness=1):
+    (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
+    x = int(max(5, min(x, img.shape[1] - tw - 5)))
+    y = int(max(th + 5, min(y, img.shape[0] - 5)))
+    cv2.rectangle(img, (x - 3, y - th - 4), (x + tw + 3, y + 2), (0, 0, 0), -1)
+    cv2.putText(img, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_AA)
 
 
 def run_inference(img_path):
@@ -178,9 +89,9 @@ def run_inference(img_path):
     
     # Parse image filename to get GT info
     file_obj_id, frame_id = parse_image_filename(img_path)
-    gt_rot, gt_trans, gt_bbox = None, None, None
+    gt_rot, gt_trans = None, None
     if file_obj_id and frame_id:
-        gt_rot, gt_trans, gt_bbox = load_ground_truth(file_obj_id, frame_id)
+        gt_rot, gt_trans = load_ground_truth(DATA_ROOT, file_obj_id, frame_id)
         if gt_rot is not None:
             print(f"Ground truth loaded for object {file_obj_id}, frame {frame_id}")
     
@@ -229,7 +140,7 @@ def run_inference(img_path):
         # Compute ADD metric if ground truth is available
         metrics = None
         if gt_rot is not None and gt_trans is not None and obj_id_str == file_obj_id:
-            model_points = load_model_points(obj_id_str)
+            model_points = load_model_points(MESH_DIR, obj_id_str)
             if model_points is not None:
                 metrics = compute_add(pred_quat, pred_trans, gt_rot, gt_trans, model_points)
                 xyz = metrics['trans_xyz_mm']
@@ -269,16 +180,16 @@ def run_inference(img_path):
                 label = f"{obj_id_str} ({conf:.2f})"
                 color = (0, 255, 255)
             
-            cv2.putText(viz_img, label, (x1, y1 - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            # Draw label for this detection
+            draw_label_with_bg(viz_img, label, x1, max(25, y1 - 10), color, scale=0.55, thickness=1)
     
-    # Add legend
-    cv2.putText(viz_img, "Cyan=Predicted | Green=GroundTruth", 
-                (10, h_img - 75), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-    cv2.putText(viz_img, "Axes: X=Red(Front) | Y=Green(Left) | Z=Blue(Top)", 
-                (10, h_img - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-    cv2.putText(viz_img, "ADD: Green<20mm | Yellow<50mm | Red>50mm", 
-                (10, h_img - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+    # Add legend (outside the detection loop)
+    put_text_with_outline(viz_img, "Cyan=Predicted | Green=GroundTruth", 
+                          (10, h_img - 70), (255, 255, 255), scale=0.6, thickness=2)
+    put_text_with_outline(viz_img, "Axes: X=Red(Front) | Y=Green(Left) | Z=Blue(Top)", 
+                          (10, h_img - 45), (255, 255, 255), scale=0.6, thickness=2)
+    put_text_with_outline(viz_img, "ADD: Green - Excellent | Yellow - Good | Red - Poor", 
+                          (10, h_img - 20), (0, 255, 255), scale=0.6, thickness=2)
     
     plt.figure(figsize=(12, 10))
     plt.imshow(cv2.cvtColor(viz_img, cv2.COLOR_BGR2RGB))
