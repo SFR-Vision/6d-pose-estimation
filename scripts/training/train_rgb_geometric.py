@@ -27,7 +27,7 @@ MODEL_DIR = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "mode
 SAVE_DIR = os.path.join(PROJECT_ROOT, "weights_rgb_geometric")
 os.makedirs(SAVE_DIR, exist_ok=True)
 
-BATCH_SIZE = 64
+BATCH_SIZE = 48
 EPOCHS = 75
 LEARNING_RATE = 1e-4
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'

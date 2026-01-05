@@ -27,7 +27,7 @@ MODEL_DIR = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "mode
 SAVE_DIR = os.path.join(PROJECT_ROOT, "weights_rgbd_geometric")
 os.makedirs(SAVE_DIR, exist_ok=True)
 
-BATCH_SIZE = 32
+BATCH_SIZE = 48
 EPOCHS = 75
 LEARNING_RATE = 1e-4
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -67,7 +67,8 @@ def train():
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
     
-    criterion = PoseLoss(rot_weight=2, trans_weight=5, z_only=True)  # Learn Z offset
+    # Learn Z from RGB+depth fusion (X,Y geometric)
+    criterion = PoseLoss(rot_weight=2, trans_weight=5, z_only=True)
     eval_criterion = ADDLoss(MODEL_DIR, DEVICE)
 
     print(f"Model parameters: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
@@ -107,14 +108,14 @@ def train():
         for rgb, depth, depth_raw, z_sensor, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix in pbar:
             rgb = rgb.to(DEVICE)
             depth = depth.to(DEVICE)
-            z_sensor = z_sensor.to(DEVICE)
+            # z_sensor not needed - model predicts Z from RGB+depth features
             gt_rot = gt_rot.to(DEVICE)
             gt_trans = gt_trans.to(DEVICE)
             bbox_center = bbox_center.to(DEVICE)
             cam_matrix = cam_matrix.to(DEVICE)
 
             optimizer.zero_grad()
-            pred_rot, pred_trans = model(rgb, depth, z_sensor, bbox_center, cam_matrix)
+            pred_rot, pred_trans = model(rgb, depth, None, bbox_center, cam_matrix)
             loss = criterion(pred_rot, pred_trans, gt_rot, gt_trans)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -136,13 +137,13 @@ def train():
             for rgb, depth, depth_raw, z_sensor, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix in val_loader:
                 rgb = rgb.to(DEVICE)
                 depth = depth.to(DEVICE)
-                z_sensor = z_sensor.to(DEVICE)
+                # z_sensor not needed - model predicts Z from RGB+depth features
                 gt_rot = gt_rot.to(DEVICE)
                 gt_trans = gt_trans.to(DEVICE)
                 bbox_center = bbox_center.to(DEVICE)
                 cam_matrix = cam_matrix.to(DEVICE)
 
-                pred_rot, pred_trans = model(rgb, depth, z_sensor, bbox_center, cam_matrix)
+                pred_rot, pred_trans = model(rgb, depth, None, bbox_center, cam_matrix)
                 
                 val_loss = criterion(pred_rot, pred_trans, gt_rot, gt_trans)
                 val_loss_sum += val_loss.item()

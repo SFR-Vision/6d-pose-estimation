@@ -172,34 +172,23 @@ def run_inference(img_path, depth_path=None):
         # Use original bbox center and K (consistent with dataset_rgbd.py)
         bbox_center_orig = np.array([c_x_box, c_y_box], dtype=np.float32)
         
-        # Normalize depth for CNN input
+        # Normalize depth for CNN input (same as training)
         depth_meters = crop_depth_resized / 1000.0
-        depth_min, depth_max = 0.1, 1.6
-        depth_normalized = np.clip((depth_meters - depth_min) / (depth_max - depth_min), 0, 1)
+        depth_min, depth_max = 0.1, 2.0
+        depth_normalized = (depth_meters - depth_min) / (depth_max - depth_min)
+        depth_normalized = np.clip(depth_normalized, 0, 1)
         depth_normalized[depth_meters < 0.01] = 0
         
-        # Sensor Z at bbox center (fallback to median crop depth if missing)
-        depth_at_center_m = 0.0
-        if 0 <= int(c_y_box) < depth_img_m.shape[0] and 0 <= int(c_x_box) < depth_img_m.shape[1]:
-            depth_at_center_m = float(depth_img_m[int(c_y_box), int(c_x_box)])
-        if depth_at_center_m <= 0:
-            valid_depths = depth_meters[depth_meters > 0]
-            if valid_depths.size > 0:
-                depth_at_center_m = float(np.median(valid_depths))
-        if depth_at_center_m <= 0:
-            depth_at_center_m = 0.6  # default fallback in meters
-
         # Prepare inputs
         input_rgb = transform(crop_rgb_resized).unsqueeze(0).to(device)
-        # Depth normalized: add channel dim [1, 224, 224] -> [1, 1, 224, 224]
-        input_depth = torch.tensor(depth_normalized[..., np.newaxis], dtype=torch.float32).permute(2, 0, 1).unsqueeze(0).to(device)
-        z_sensor = torch.tensor([depth_at_center_m], dtype=torch.float32).to(device)
+        # Depth normalized: add channel dim [224, 224] -> [1, 224, 224] -> [1, 1, 224, 224]
+        input_depth = torch.from_numpy(depth_normalized).unsqueeze(0).unsqueeze(0).float().to(device)
         bbox_center = torch.from_numpy(bbox_center_orig).float().unsqueeze(0).to(device)
         cam_matrix = torch.tensor(K, dtype=torch.float32).unsqueeze(0).to(device)
         
-        # Pose inference
+        # Pose inference (model predicts Z from RGB+depth, no z_sensor needed)
         with torch.no_grad():
-            pred_quat, pred_trans = model(input_rgb, input_depth, z_sensor, bbox_center, cam_matrix)
+            pred_quat, pred_trans = model(input_rgb, input_depth, None, bbox_center, cam_matrix)
         
         pred_quat = pred_quat.cpu().numpy()[0]  # (4,)
         pred_trans = pred_trans.cpu().numpy().flatten()  # (3,)

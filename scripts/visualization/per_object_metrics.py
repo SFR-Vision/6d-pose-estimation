@@ -12,6 +12,8 @@ import numpy as np
 import torch
 from torchvision import transforms
 from tqdm import tqdm
+import tkinter as tk
+from tkinter import ttk
 
 from data.dataset_rgb import LineMODDatasetRGB, LineMODDatasetRGBGeometric
 from data.dataset_rgbd import LineMODDatasetRGBD
@@ -290,6 +292,204 @@ def main():
     
     print("\n* = Symmetric object (uses ADD-S metric)")
     print("=" * 80)
+    
+    # Show Excel-like GUI table
+    show_excel_table(all_results, model_names, all_obj_ids)
+
+
+def show_excel_table(all_results, model_names, all_obj_ids):
+    """Display results in an Excel-like GUI table."""
+    
+    # Create main window
+    root = tk.Tk()
+    root.title("6D Pose Estimation - Per-Object Metrics Comparison")
+    root.geometry("1200x800")
+    
+    # Create notebook for tabs
+    notebook = ttk.Notebook(root)
+    notebook.pack(fill='both', expand=True, padx=10, pady=10)
+    
+    # Tab 1: ADD Metrics (mm)
+    frame_add = ttk.Frame(notebook)
+    notebook.add(frame_add, text='ADD Metrics (mm)')
+    
+    # Create Treeview for ADD
+    tree_add = ttk.Treeview(frame_add, columns=['Object'] + model_names, show='headings', height=20)
+    tree_add.pack(side='left', fill='both', expand=True)
+    
+    # Scrollbars
+    vsb_add = ttk.Scrollbar(frame_add, orient="vertical", command=tree_add.yview)
+    vsb_add.pack(side='right', fill='y')
+    tree_add.configure(yscrollcommand=vsb_add.set)
+    
+    # Define columns
+    tree_add.heading('Object', text='Object')
+    tree_add.column('Object', width=200, anchor='w')
+    
+    for model_name in model_names:
+        tree_add.heading(model_name, text=model_name)
+        tree_add.column(model_name, width=150, anchor='center')
+    
+    # Add data rows for ADD
+    model_avgs = {name: [] for name in model_names}
+    
+    for obj_id in sorted(all_obj_ids):
+        obj_name = OBJ_NAMES.get(obj_id, f"obj_{obj_id}")
+        sym_marker = " *" if obj_id in SYMMETRIC_OBJECTS else ""
+        
+        values = [obj_name + sym_marker]
+        for model_name in model_names:
+            if model_name in all_results and all_results[model_name] and obj_id in all_results[model_name]:
+                add_val = all_results[model_name][obj_id]['add_mm']
+                values.append(f"{add_val:.1f}")
+                model_avgs[model_name].append(add_val)
+            else:
+                values.append("N/A")
+        
+        tree_add.insert('', 'end', values=values)
+    
+    # Add average row
+    avg_values = ["AVERAGE"]
+    for model_name in model_names:
+        if model_avgs[model_name]:
+            avg_values.append(f"{np.mean(model_avgs[model_name]):.1f}")
+        else:
+            avg_values.append("N/A")
+    tree_add.insert('', 'end', values=avg_values, tags=('average',))
+    tree_add.tag_configure('average', background='#E8F4F8', font=('TkDefaultFont', 9, 'bold'))
+    
+    # Tab 2: ADD-2cm Accuracy (%)
+    frame_acc = ttk.Frame(notebook)
+    notebook.add(frame_acc, text='ADD-2cm Accuracy (%)')
+    
+    # Create Treeview for Accuracy
+    tree_acc = ttk.Treeview(frame_acc, columns=['Object'] + model_names, show='headings', height=20)
+    tree_acc.pack(side='left', fill='both', expand=True)
+    
+    # Scrollbars
+    vsb_acc = ttk.Scrollbar(frame_acc, orient="vertical", command=tree_acc.yview)
+    vsb_acc.pack(side='right', fill='y')
+    tree_acc.configure(yscrollcommand=vsb_acc.set)
+    
+    # Define columns
+    tree_acc.heading('Object', text='Object')
+    tree_acc.column('Object', width=200, anchor='w')
+    
+    for model_name in model_names:
+        tree_acc.heading(model_name, text=model_name)
+        tree_acc.column(model_name, width=150, anchor='center')
+    
+    # Add data rows for Accuracy
+    model_acc_avgs = {name: [] for name in model_names}
+    
+    for obj_id in sorted(all_obj_ids):
+        obj_name = OBJ_NAMES.get(obj_id, f"obj_{obj_id}")
+        sym_marker = " *" if obj_id in SYMMETRIC_OBJECTS else ""
+        
+        values = [obj_name + sym_marker]
+        for model_name in model_names:
+            if model_name in all_results and all_results[model_name] and obj_id in all_results[model_name]:
+                acc_val = all_results[model_name][obj_id]['acc_2cm']
+                values.append(f"{acc_val:.1f}")
+                model_acc_avgs[model_name].append(acc_val)
+            else:
+                values.append("N/A")
+        
+        tree_acc.insert('', 'end', values=values)
+    
+    # Add average row
+    avg_values = ["AVERAGE"]
+    for model_name in model_names:
+        if model_acc_avgs[model_name]:
+            avg_values.append(f"{np.mean(model_acc_avgs[model_name]):.1f}")
+        else:
+            avg_values.append("N/A")
+    tree_acc.insert('', 'end', values=avg_values, tags=('average',))
+    tree_acc.tag_configure('average', background='#E8F4F8', font=('TkDefaultFont', 9, 'bold'))
+    
+    # Add note at bottom
+    note_frame = ttk.Frame(root)
+    note_frame.pack(fill='x', padx=10, pady=5)
+    
+    note_label = ttk.Label(note_frame, text="* = Symmetric object (uses ADD-S metric) | Lower ADD is better | Higher Accuracy is better", 
+                          font=('TkDefaultFont', 9, 'italic'))
+    note_label.pack()
+    
+    # Add export button
+    button_frame = ttk.Frame(root)
+    button_frame.pack(fill='x', padx=10, pady=5)
+    
+    def export_to_csv():
+        """Export data to CSV files."""
+        try:
+            # Export ADD metrics
+            with open('per_object_ADD_metrics.csv', 'w') as f:
+                # Header
+                f.write('Object,' + ','.join(model_names) + '\n')
+                
+                # Data rows
+                for obj_id in sorted(all_obj_ids):
+                    obj_name = OBJ_NAMES.get(obj_id, f"obj_{obj_id}")
+                    row = [obj_name]
+                    for model_name in model_names:
+                        if model_name in all_results and all_results[model_name] and obj_id in all_results[model_name]:
+                            row.append(f"{all_results[model_name][obj_id]['add_mm']:.1f}")
+                        else:
+                            row.append('N/A')
+                    f.write(','.join(row) + '\n')
+                
+                # Average row
+                avg_row = ['AVERAGE']
+                for model_name in model_names:
+                    vals = [all_results[model_name][obj_id]['add_mm'] 
+                           for obj_id in sorted(all_obj_ids) 
+                           if model_name in all_results and all_results[model_name] and obj_id in all_results[model_name]]
+                    if vals:
+                        avg_row.append(f"{np.mean(vals):.1f}")
+                    else:
+                        avg_row.append('N/A')
+                f.write(','.join(avg_row) + '\n')
+            
+            # Export accuracy metrics
+            with open('per_object_accuracy_metrics.csv', 'w') as f:
+                # Header
+                f.write('Object,' + ','.join(model_names) + '\n')
+                
+                # Data rows
+                for obj_id in sorted(all_obj_ids):
+                    obj_name = OBJ_NAMES.get(obj_id, f"obj_{obj_id}")
+                    row = [obj_name]
+                    for model_name in model_names:
+                        if model_name in all_results and all_results[model_name] and obj_id in all_results[model_name]:
+                            row.append(f"{all_results[model_name][obj_id]['acc_2cm']:.1f}")
+                        else:
+                            row.append('N/A')
+                    f.write(','.join(row) + '\n')
+                
+                # Average row
+                avg_row = ['AVERAGE']
+                for model_name in model_names:
+                    vals = [all_results[model_name][obj_id]['acc_2cm'] 
+                           for obj_id in sorted(all_obj_ids) 
+                           if model_name in all_results and all_results[model_name] and obj_id in all_results[model_name]]
+                    if vals:
+                        avg_row.append(f"{np.mean(vals):.1f}")
+                    else:
+                        avg_row.append('N/A')
+                f.write(','.join(avg_row) + '\n')
+            
+            export_label.config(text="✓ Exported to per_object_ADD_metrics.csv and per_object_accuracy_metrics.csv", foreground='green')
+        except Exception as e:
+            export_label.config(text=f"✗ Export failed: {e}", foreground='red')
+    
+    export_btn = ttk.Button(button_frame, text="Export to CSV", command=export_to_csv)
+    export_btn.pack(side='left', padx=5)
+    
+    export_label = ttk.Label(button_frame, text="")
+    export_label.pack(side='left', padx=10)
+    
+    # Start GUI
+    root.mainloop()
 
 
 if __name__ == '__main__':
