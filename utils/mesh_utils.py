@@ -2,6 +2,54 @@
 
 import os
 import numpy as np
+import yaml
+
+
+def load_mesh_corners_from_info(models_dir, obj_id_str):
+    """
+    Load 3D bounding box corners from models_info.yml (faster, official dimensions).
+    
+    Args:
+        models_dir: Path to directory containing models_info.yml
+        obj_id_str: Object ID string (e.g., "01", "02")
+    
+    Returns:
+        numpy array of shape (8, 3) with box corners in meters, or None if not found
+    """
+    models_info_path = os.path.join(models_dir, "models_info.yml")
+    if not os.path.exists(models_info_path):
+        return None
+    
+    try:
+        with open(models_info_path, 'r') as f:
+            info = yaml.safe_load(f)
+        
+        # Convert obj_id_str to integer key (e.g., "02" -> 2)
+        obj_key = int(obj_id_str)
+        if obj_key not in info:
+            return None
+        
+        obj_info = info[obj_key]
+        
+        # Get bounding box dimensions (convert mm to meters)
+        min_x = obj_info['min_x'] / 1000.0
+        min_y = obj_info['min_y'] / 1000.0
+        min_z = obj_info['min_z'] / 1000.0
+        
+        max_x = (obj_info['min_x'] + obj_info['size_x']) / 1000.0
+        max_y = (obj_info['min_y'] + obj_info['size_y']) / 1000.0
+        max_z = (obj_info['min_z'] + obj_info['size_z']) / 1000.0
+        
+        # Create 8 corners (same order as mesh-based version)
+        return np.array([
+            [min_x, min_y, min_z], [max_x, min_y, min_z],
+            [max_x, max_y, min_z], [min_x, max_y, min_z],
+            [min_x, min_y, max_z], [max_x, min_y, max_z],
+            [max_x, max_y, max_z], [min_x, max_y, max_z]
+        ])
+    except Exception as e:
+        print(f"Error loading corners from models_info.yml: {e}")
+        return None
 
 
 def load_mesh_corners(mesh_dir, obj_id_str):

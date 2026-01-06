@@ -57,9 +57,22 @@ class ADDLoss(nn.Module):
             path = os.path.join(model_dir, ply_file)
             pts = self._load_ply(path) / 1000.0
             
-            # Filter outliers
+            # Filter outliers - two-stage approach for robustness
+            # Stage 1: Remove points very far from origin (gross outliers)
             distances = np.linalg.norm(pts, axis=1)
             pts = pts[distances < 0.5]
+            
+            if pts.shape[0] == 0:
+                continue
+            
+            # Stage 2: Percentile-based filtering per dimension (fine outliers)
+            min_pt = np.percentile(pts, 1, axis=0)
+            max_pt = np.percentile(pts, 99, axis=0)
+            mask = (pts >= min_pt).all(axis=1) & (pts <= max_pt).all(axis=1)
+            pts = pts[mask]
+            
+            if pts.shape[0] == 0:
+                continue
             
             # Get diameter
             if obj_id in official_diameters:

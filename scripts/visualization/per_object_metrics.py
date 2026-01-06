@@ -30,19 +30,19 @@ OBJ_NAMES = {
     1: "02-benchvise",
     3: "04-camera",
     4: "05-can",
-    5: "06-driller",
-    7: "08-duck",
-    8: "09-eggbox",
-    9: "10-glue",
-    10: "11-holepuncher",
-    11: "12-iron",
-    12: "13-lamp",
-    13: "14-phone",
-    14: "15-cat"
+    5: "06-cat",
+    7: "08-driller",
+    8: "09-duck",
+    9: "10-eggbox",
+    10: "11-glue",
+    11: "12-holepuncher",
+    12: "13-iron",
+    13: "14-lamp",
+    14: "15-phone"
 }
 
-# Symmetric objects
-SYMMETRIC_OBJECTS = {8, 9}  # 09-eggbox, 10-glue
+# Symmetric objects (eggbox and glue)
+SYMMETRIC_OBJECTS = {9, 10}  # 10-eggbox, 11-glue
 
 WEIGHTS = {
     'RGB': os.path.join(PROJECT_ROOT, "weights_rgb", "best_pose_model.pth"),

@@ -17,7 +17,7 @@ from torchvision import transforms
 from ultralytics import YOLO
 
 from models.pose_net_rgb_geometric import PoseNetRGBGeometric
-from utils.mesh_utils import load_mesh_corners
+from utils.mesh_utils import load_mesh_corners_from_info
 from utils.visualization import project_points, draw_3d_box, draw_axes
 from utils.camera import DEFAULT_K
 from utils.inference_utils import load_ground_truth, load_model_points, compute_add, parse_image_filename
@@ -152,11 +152,11 @@ def run_inference(img_path):
                 print(f"    GT Trans:    [{metrics['gt_trans'][0]:.3f}, {metrics['gt_trans'][1]:.3f}, {metrics['gt_trans'][2]:.3f}] m")
         
         # Visualization (project_points handles quaternion conversion)
-        corners = load_mesh_corners(MESH_DIR, obj_id_str)
+        corners = load_mesh_corners_from_info(MESH_DIR, obj_id_str)
         if corners is not None:
-            # Draw predicted 3D box (cyan, thick)
+            # Draw predicted 3D box (yellow, thick)
             box_2d = project_points(corners, pred_quat, pred_trans, K)
-            draw_3d_box(viz_img, box_2d, (0, 255, 255), 2)
+            draw_3d_box(viz_img, box_2d, (0, 255, 255), 2)  # BGR: yellow
             draw_axes(viz_img, pred_quat, pred_trans, K, scale=0.1)
             
             # Draw ground truth 3D box (green, thin)
@@ -184,7 +184,7 @@ def run_inference(img_path):
             draw_label_with_bg(viz_img, label, x1, max(25, y1 - 10), color, scale=0.55, thickness=1)
     
     # Add legend (outside the detection loop)
-    put_text_with_outline(viz_img, "Cyan=Predicted | Green=GroundTruth", 
+    put_text_with_outline(viz_img, "Yellow=Predicted | Green=GroundTruth", 
                           (10, h_img - 70), (255, 255, 255), scale=0.6, thickness=2)
     put_text_with_outline(viz_img, "Axes: X=Red(Front) | Y=Green(Left) | Z=Blue(Top)", 
                           (10, h_img - 45), (255, 255, 255), scale=0.6, thickness=2)
