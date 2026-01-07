@@ -15,7 +15,7 @@ from tqdm import tqdm
 import tkinter as tk
 from tkinter import ttk
 
-from data.dataset_rgb import LineMODDatasetRGB, LineMODDatasetRGBGeometric
+from data.dataset_rgb import LineMODDatasetRGB
 from data.dataset_rgbd import LineMODDatasetRGBD
 from models.add_loss import ADDLoss
 
@@ -46,8 +46,7 @@ SYMMETRIC_OBJECTS = {9, 10}  # 10-eggbox, 11-glue
 
 WEIGHTS = {
     'RGB': os.path.join(PROJECT_ROOT, "weights_rgb", "best_pose_model.pth"),
-    'RGB-Geo': os.path.join(PROJECT_ROOT, "weights_rgb_geometric", "best_pose_model.pth"),
-    'RGBD-Geo': os.path.join(PROJECT_ROOT, "weights_rgbd_geometric", "best_pose_model.pth"),
+    'RGBD': os.path.join(PROJECT_ROOT, "weights_rgbd", "best_pose_model.pth"),
 }
 
 
@@ -60,12 +59,9 @@ def load_pose_model(model_name, weights_path):
         if model_name == 'RGB':
             from models.pose_net_rgb import PoseNetRGB
             model = PoseNetRGB(pretrained=False)
-        elif model_name == 'RGB-Geo':
-            from models.pose_net_rgb_geometric import PoseNetRGBGeometric
-            model = PoseNetRGBGeometric(pretrained=False)
-        elif model_name == 'RGBD-Geo':
-            from models.pose_net_rgbd_geometric import PoseNetRGBDGeometric
-            model = PoseNetRGBDGeometric(pretrained=False)
+        elif model_name == 'RGBD':
+            from models.pose_net_rgbd import PoseNetRGBD
+            model = PoseNetRGBD(pretrained=False)
         else:
             return None
         
@@ -78,7 +74,7 @@ def load_pose_model(model_name, weights_path):
         return None
 
 
-def evaluate_per_object(model, model_name, dataset, add_loss, is_rgbd=False, needs_geometry=False):
+def evaluate_per_object(model, model_name, dataset, add_loss, is_rgbd=False, needs_geometry=False, is_4ch=False, is_5ch=False):
     """Evaluate model and return per-object ADD metrics using ADDLoss class."""
     if model is None:
         return None
@@ -94,29 +90,22 @@ def evaluate_per_object(model, model_name, dataset, add_loss, is_rgbd=False, nee
             sample = dataset[i]
             
             if is_rgbd:
-                rgb, depth, _depth_raw, z_sensor, gt_rot, gt_trans, obj_id, bbox_center, cam_matrix = sample
-                rgb = rgb.unsqueeze(0).to(DEVICE)
-                depth = depth.unsqueeze(0).to(DEVICE)
+                # RGBD dataset returns: rgbdm (5ch), z_sensor, gt_rot, gt_trans, obj_id, bbox_center, cam_matrix
+                rgbdm, z_sensor, gt_rot, gt_trans, obj_id, bbox_center, cam_matrix = sample
+                rgbdm = rgbdm.unsqueeze(0).to(DEVICE)
                 z_sensor = z_sensor.unsqueeze(0).to(DEVICE)
                 bbox_center = bbox_center.unsqueeze(0).to(DEVICE)
                 cam_matrix = cam_matrix.unsqueeze(0).to(DEVICE)
                 
                 if needs_geometry:
-                    pred_rot, pred_trans = model(rgb, depth, z_sensor, bbox_center, cam_matrix)
+                    pred_rot, pred_trans = model(rgbdm, z_sensor, bbox_center, cam_matrix)
             else:
-                # Handle both RGB and RGB-Geometric datasets
-                if needs_geometry:
-                    # RGB-Geometric dataset returns 6 values
-                    rgb, gt_rot, gt_trans, obj_id, bbox_center, cam_matrix = sample
-                    rgb = rgb.unsqueeze(0).to(DEVICE)
-                    bbox_center = bbox_center.unsqueeze(0).to(DEVICE)
-                    cam_matrix = cam_matrix.unsqueeze(0).to(DEVICE)
-                    pred_rot, pred_trans = model(rgb, bbox_center, cam_matrix)
-                else:
-                    # RGB dataset returns 4 values
-                    rgb, gt_rot, gt_trans, obj_id = sample
-                    rgb = rgb.unsqueeze(0).to(DEVICE)
-                    pred_rot, pred_trans = model(rgb)
+                # RGB: (rgbm_4ch, gt_rot, gt_trans, obj_id, bbox_center, cam_matrix)
+                rgbm, gt_rot, gt_trans, obj_id, bbox_center, cam_matrix = sample
+                rgbm = rgbm.unsqueeze(0).to(DEVICE)
+                bbox_center = bbox_center.unsqueeze(0).to(DEVICE)
+                cam_matrix = cam_matrix.unsqueeze(0).to(DEVICE)
+                pred_rot, pred_trans = model(rgbm, bbox_center, cam_matrix)
             
             obj_id_val = int(obj_id.item()) if hasattr(obj_id, 'item') else int(obj_id)
             gt_rot = gt_rot.unsqueeze(0).to(DEVICE)
@@ -167,7 +156,6 @@ def main():
     # Load datasets
     print("Loading datasets...")
     rgb_dataset = LineMODDatasetRGB(DATA_ROOT, mode='test', transform=val_transform)
-    rgb_geo_dataset = LineMODDatasetRGBGeometric(DATA_ROOT, mode='test', transform=val_transform)
     
     try:
         rgbd_dataset = LineMODDatasetRGBD(DATA_ROOT, mode='test', transform=val_transform)
@@ -192,20 +180,14 @@ def main():
     if models['RGB'] is not None:
         all_results['RGB'] = evaluate_per_object(
             models['RGB'], 'RGB', rgb_dataset, add_loss,
-            is_rgbd=False, needs_geometry=False
-        )
-    
-    if models['RGB-Geo'] is not None:
-        all_results['RGB-Geo'] = evaluate_per_object(
-            models['RGB-Geo'], 'RGB-Geo', rgb_geo_dataset, add_loss,
-            is_rgbd=False, needs_geometry=True
+            is_rgbd=False, needs_geometry=True, is_4ch=True
         )
     
     if rgbd_dataset is not None:
-        if models['RGBD-Geo'] is not None:
-            all_results['RGBD-Geo'] = evaluate_per_object(
-                models['RGBD-Geo'], 'RGBD-Geo', rgbd_dataset, add_loss,
-                is_rgbd=True, needs_geometry=True
+        if models['RGBD'] is not None:
+            all_results['RGBD'] = evaluate_per_object(
+                models['RGBD'], 'RGBD', rgbd_dataset, add_loss,
+                is_rgbd=True, needs_geometry=True, is_5ch=True
             )
     
     # Print results table - ADD (mm)
@@ -213,7 +195,7 @@ def main():
     print("Per-Object ADD Metrics (mm) - Lower is better")
     print("=" * 80)
     
-    model_names = [name for name in ['RGB', 'RGB-Geo', 'RGBD-Geo'] if name in all_results]
+    model_names = [name for name in ['RGB', 'RGBD'] if name in all_results]
     
     header = f"{'Object':<18}"
     for name in model_names:

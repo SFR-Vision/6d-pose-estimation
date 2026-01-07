@@ -1,7 +1,6 @@
-"""LineMOD dataset for RGB-based pose estimation models."""
+"""LineMOD dataset for 4-channel (RGB+Mask) pose estimation."""
 
 import os
-
 import cv2
 import numpy as np
 import torch
@@ -9,11 +8,14 @@ import yaml
 from scipy.spatial.transform import Rotation as R
 from torch.utils.data import Dataset
 
+# Suppress OpenCV warnings
+cv2.setLogLevel(3)
 
-class LineMODDatasetBase(Dataset):
+
+class LineMODDatasetRGB(Dataset):
     """
-    Base class for LineMOD dataset with shared loading and validation logic.
-    Handles data loading, splits, and common preprocessing.
+    LineMOD dataset that returns RGB+Mask as 4-channel input.
+    Mask is provided as 4th channel rather than applied to RGB.
     """
     
     def __init__(self, root_dir, mode='train', transform=None, img_size=224):
@@ -44,39 +46,38 @@ class LineMODDatasetBase(Dataset):
             try:
                 with open(gt_path, 'r') as f:
                     gts = yaml.safe_load(f)
-                
                 with open(info_path, 'r') as f:
                     infos = yaml.safe_load(f)
-            except Exception as e:
-                print(f"Error loading YAML for object {obj_folder}: {e}")
+            except:
                 continue
             
-            images = sorted([img for img in os.listdir(rgb_path) if img.endswith(".png")])
+            if not gts or not infos:
+                continue
             
-            for i, img_name in enumerate(images):
-                try:
-                    frame_id = int(img_name.split('.')[0])
-                except (ValueError, IndexError):
-                    print(f"Invalid image filename format: {img_name}")
-                    continue
-                
-                # Interleaved split: 80% train, 10% val, 10% test
+            rgb_files = sorted([f for f in os.listdir(rgb_path) if f.endswith('.png')])
+            
+            for i, img_name in enumerate(rgb_files):
                 cycle = i % 10
-                if cycle == 8:
-                    split_name = 'val'
-                elif cycle == 9:
-                    split_name = 'test'
-                else:
-                    split_name = 'train'
-                
-                if split_name != self.mode:
+                if (self.mode == 'val' and cycle != 8) or \
+                   (self.mode == 'test' and cycle != 9) or \
+                   (self.mode == 'train' and cycle >= 8):
                     continue
-
-                if frame_id in gts and frame_id in infos:
+                
+                frame_id = int(img_name.split('.')[0])
+                
+                if frame_id not in gts or frame_id not in infos:
+                    continue
+                
+                if isinstance(gts[frame_id], list):
                     for anno in gts[frame_id]:
                         if str(int(anno['obj_id'])).zfill(2) == obj_folder:
+                            mask_path = os.path.join(base_path, 'mask', img_name)
+                            # Skip samples without masks (e.g., object 15)
+                            if not os.path.exists(mask_path):
+                                continue
                             self.all_data.append({
                                 'img_path': os.path.join(rgb_path, img_name),
+                                'mask_path': mask_path,
                                 'obj_id': int(obj_folder) - 1,
                                 'bbox': anno['obj_bb'],
                                 'cam_R_m2c': anno['cam_R_m2c'],
@@ -87,11 +88,15 @@ class LineMODDatasetBase(Dataset):
     def __len__(self):
         return len(self.all_data)
 
-    def _load_and_validate(self, idx):
-        """Common loading, validation, and preprocessing logic.
-        
+    def __getitem__(self, idx):
+        """
         Returns:
-            (rgb_crop, quaternion, translation, obj_id, bbox_center, camera_matrix)
+            rgbm_tensor: (4, H, W) - RGB + Mask as 4th channel
+            quaternion: (4,) rotation as [x,y,z,w]
+            translation: (3,) in meters
+            obj_id: object ID
+            bbox_center: (2,) center in pixels
+            camera_matrix: (4,) [fx, fy, cx, cy]
         """
         item = self.all_data[idx]
         
@@ -101,16 +106,27 @@ class LineMODDatasetBase(Dataset):
             raise FileNotFoundError(f"Failed to load image: {item['img_path']}")
         rgb_image = cv2.cvtColor(rgb_image, cv2.COLOR_BGR2RGB)
         
+        # Load mask (REQUIRED for this dataset - no fallback)
+        if not os.path.exists(item['mask_path']):
+            raise FileNotFoundError(f"Mask file not found: {item['mask_path']}")
+        
+        mask = cv2.imread(item['mask_path'], cv2.IMREAD_GRAYSCALE)
+        if mask is None:
+            raise FileNotFoundError(f"Failed to load mask: {item['mask_path']}")
+        
+        # Normalize to [0, 1]
+        mask = (mask > 127).astype(np.float32)
+        
         # Ground truth
         gt_rot_mat = np.array(item['cam_R_m2c']).reshape(3, 3)
         gt_trans = np.array(item['cam_t_m2c'])
         
-        # Validate rotation matrix (det should be ~1)
+        # Validate rotation matrix
         det_R = np.linalg.det(gt_rot_mat)
         if not (0.99 < det_R < 1.01):
             raise ValueError(f"Invalid rotation matrix determinant: {det_R}")
         
-        # Validate translation (no NaN or inf)
+        # Validate translation
         if not np.all(np.isfinite(gt_trans)):
             raise ValueError(f"Invalid translation values: {gt_trans}")
         
@@ -118,7 +134,7 @@ class LineMODDatasetBase(Dataset):
         x, y, w, h = item['bbox']
         bbox_center_gt = torch.tensor([x + w/2, y + h/2], dtype=torch.float32)
         
-        # Square crop with padding - compute size with proper rounding
+        # Square crop with padding
         c_x, c_y = x + w/2, y + h/2
         size = max(w, h) * 1.2
         size = int(round(size))
@@ -134,13 +150,20 @@ class LineMODDatasetBase(Dataset):
         if pad_l > 0 or pad_t > 0 or pad_r > 0 or pad_b > 0:
             rgb_image = cv2.copyMakeBorder(rgb_image, pad_t, pad_b, pad_l, pad_r, 
                                            cv2.BORDER_CONSTANT, value=0)
+            mask = cv2.copyMakeBorder(mask, pad_t, pad_b, pad_l, pad_r,
+                                     cv2.BORDER_CONSTANT, value=0)
             x1 += pad_l
             y1 += pad_t
             
         rgb_crop = rgb_image[y1:y1+size, x1:x1+size]
+        mask_crop = mask[y1:y1+size, x1:x1+size]
+        
         if rgb_crop.shape[0] != size or rgb_crop.shape[1] != size:
             raise RuntimeError(f"Crop size mismatch: got {rgb_crop.shape}, expected ({size}, {size})")
+        
+        # Resize both RGB and mask
         rgb_crop = cv2.resize(rgb_crop, (self.img_size, self.img_size))
+        mask_crop = cv2.resize(mask_crop, (self.img_size, self.img_size), interpolation=cv2.INTER_NEAREST)
         
         # Labels
         translation = torch.tensor(gt_trans, dtype=torch.float32) / 1000.0
@@ -149,34 +172,20 @@ class LineMODDatasetBase(Dataset):
         obj_id = torch.tensor(item['obj_id'], dtype=torch.long)
         
         # Camera intrinsics
-        cam_K = np.array(item['cam_K']).reshape(3, 3).astype(np.float32)
-        camera_matrix = torch.from_numpy(cam_K)
+        cam_K = np.array(item['cam_K']).reshape(3, 3)
+        camera_matrix = torch.tensor([cam_K[0,0], cam_K[1,1], cam_K[0,2], cam_K[1,2]], 
+                                     dtype=torch.float32)
         
-        # Apply transforms
-        if self.transform:
-            rgb_crop = self.transform(rgb_crop)
+        # Convert to tensor (HWC -> CHW)
+        rgb_tensor = torch.from_numpy(rgb_crop).permute(2, 0, 1).float() / 255.0
+        mask_tensor = torch.from_numpy(mask_crop).unsqueeze(0).float()  # (1, H, W)
         
-        return rgb_crop, quaternion, translation, obj_id, bbox_center_gt, camera_matrix
-
-
-class LineMODDatasetRGB(LineMODDatasetBase):
-    """
-    LineMOD dataset for RGB-only pose estimation model.
-    Returns only what RGB model needs: (rgb, quaternion, translation, obj_id)
-    Skips bbox_center and camera_matrix to save memory.
-    """
-    
-    def __getitem__(self, idx):
-        rgb_crop, quaternion, translation, obj_id, _, _ = self._load_and_validate(idx)
-        return rgb_crop, quaternion, translation, obj_id
-
-
-class LineMODDatasetRGBGeometric(LineMODDatasetBase):
-    """
-    LineMOD dataset for RGB-Geometric pose estimation model.
-    Returns: (rgb, quaternion, translation, obj_id, bbox_center, camera_matrix)
-    Includes geometric inputs needed for pinhole camera model.
-    """
-    
-    def __getitem__(self, idx):
-        return self._load_and_validate(idx)
+        # Apply transform to RGB channels only
+        if self.transform is not None:
+            # Transform expects 3-channel input
+            rgb_tensor = self.transform(rgb_tensor)
+        
+        # Concatenate RGB + Mask -> 4 channels
+        rgbm_tensor = torch.cat([rgb_tensor, mask_tensor], dim=0)  # (4, H, W)
+        
+        return rgbm_tensor, quaternion, translation, obj_id, bbox_center_gt, camera_matrix

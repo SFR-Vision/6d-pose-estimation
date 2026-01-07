@@ -1,4 +1,4 @@
-"""Compare all 3 pose estimation models on the test set."""
+"""Compare RGB and RGBD pose estimation models on the test set."""
 
 import os
 import sys
@@ -13,7 +13,7 @@ import torch
 from torchvision import transforms
 from tqdm import tqdm
 
-from data.dataset_rgb import LineMODDatasetRGB, LineMODDatasetRGBGeometric
+from data.dataset_rgb import LineMODDatasetRGB
 from data.dataset_rgbd import LineMODDatasetRGBD
 from models.add_loss import ADDLoss
 
@@ -24,8 +24,7 @@ DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 WEIGHTS = {
     'RGB': os.path.join(PROJECT_ROOT, "weights_rgb", "best_pose_model.pth"),
-    'RGB-Geometric': os.path.join(PROJECT_ROOT, "weights_rgb_geometric", "best_pose_model.pth"),
-    'RGBD-Geometric': os.path.join(PROJECT_ROOT, "weights_rgbd_geometric", "best_pose_model.pth"),
+    'RGBD': os.path.join(PROJECT_ROOT, "weights_rgbd", "best_pose_model.pth"),
 }
 
 
@@ -39,12 +38,9 @@ def load_model(model_name, weights_path):
         if model_name == 'RGB':
             from models.pose_net_rgb import PoseNetRGB
             model = PoseNetRGB(pretrained=False)
-        elif model_name == 'RGB-Geometric':
-            from models.pose_net_rgb_geometric import PoseNetRGBGeometric
-            model = PoseNetRGBGeometric(pretrained=False)
-        elif model_name == 'RGBD-Geometric':
-            from models.pose_net_rgbd_geometric import PoseNetRGBDGeometric
-            model = PoseNetRGBDGeometric(pretrained=False)
+        elif model_name == 'RGBD':
+            from models.pose_net_rgbd import PoseNetRGBD
+            model = PoseNetRGBD(pretrained=False)
         else:
             return None
         
@@ -69,26 +65,18 @@ def evaluate_model(model, model_name, loader, criterion, is_rgbd=False, needs_ge
     with torch.no_grad():
         for batch in tqdm(loader, desc=f"Evaluating {model_name}", leave=False):
             if is_rgbd:
-                rgb, depth, depth_raw, z_sensor, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix = batch
-                rgb, depth, z_sensor = rgb.to(DEVICE), depth.to(DEVICE), z_sensor.to(DEVICE)
+                # RGBD: (rgbdm_5ch, z_sensor, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix)
+                rgbdm, z_sensor, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix = batch
+                rgbdm, z_sensor = rgbdm.to(DEVICE), z_sensor.to(DEVICE)
                 gt_rot, gt_trans, obj_ids = gt_rot.to(DEVICE), gt_trans.to(DEVICE), obj_ids.to(DEVICE)
                 bbox_center, cam_matrix = bbox_center.to(DEVICE), cam_matrix.to(DEVICE)
-                
-                if 'Geometric' in model_name:
-                    pred_rot, pred_trans = model(rgb, depth, z_sensor, bbox_center, cam_matrix)
+                pred_rot, pred_trans = model(rgbdm, z_sensor, bbox_center, cam_matrix)
             else:
-                # Handle both RGB and RGB-Geometric models
-                if needs_geometry:
-                    # RGB-Geometric: returns (rgb, quat, trans, obj_id, bbox_center, cam_matrix)
-                    rgb, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix = batch
-                    rgb, gt_rot, gt_trans, obj_ids = rgb.to(DEVICE), gt_rot.to(DEVICE), gt_trans.to(DEVICE), obj_ids.to(DEVICE)
-                    bbox_center, cam_matrix = bbox_center.to(DEVICE), cam_matrix.to(DEVICE)
-                    pred_rot, pred_trans = model(rgb, bbox_center, cam_matrix)
-                else:
-                    # RGB: returns (rgb, quat, trans, obj_id)
-                    rgb, gt_rot, gt_trans, obj_ids = batch
-                    rgb, gt_rot, gt_trans, obj_ids = rgb.to(DEVICE), gt_rot.to(DEVICE), gt_trans.to(DEVICE), obj_ids.to(DEVICE)
-                    pred_rot, pred_trans = model(rgb)
+                # RGB: (rgbm_4ch, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix)
+                rgbm, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix = batch
+                rgbm, gt_rot, gt_trans, obj_ids = rgbm.to(DEVICE), gt_rot.to(DEVICE), gt_trans.to(DEVICE), obj_ids.to(DEVICE)
+                bbox_center, cam_matrix = bbox_center.to(DEVICE), cam_matrix.to(DEVICE)
+                pred_rot, pred_trans = model(rgbm, bbox_center, cam_matrix)
             
             metrics = criterion.eval_metrics(pred_rot, pred_trans, gt_rot, gt_trans, obj_ids)
             all_metrics['add'].append(metrics['add_mean'])
@@ -118,9 +106,6 @@ def main():
     rgb_dataset = LineMODDatasetRGB(DATA_ROOT, mode='test', transform=val_transform)
     rgb_loader = torch.utils.data.DataLoader(rgb_dataset, batch_size=16, shuffle=False, num_workers=4)
     
-    rgb_geo_dataset = LineMODDatasetRGBGeometric(DATA_ROOT, mode='test', transform=val_transform)
-    rgb_geo_loader = torch.utils.data.DataLoader(rgb_geo_dataset, batch_size=16, shuffle=False, num_workers=4)
-    
     try:
         rgbd_dataset = LineMODDatasetRGBD(DATA_ROOT, mode='test', transform=val_transform)
         rgbd_loader = torch.utils.data.DataLoader(rgbd_dataset, batch_size=16, shuffle=False, num_workers=4)
@@ -143,16 +128,11 @@ def main():
     
     if models['RGB'] is not None:
         results['RGB'] = evaluate_model(models['RGB'], 'RGB', rgb_loader, criterion, 
-                                         is_rgbd=False, needs_geometry=False)
+                                         is_rgbd=False, needs_geometry=True)
     
-    if models['RGB-Geometric'] is not None:
-        results['RGB-Geometric'] = evaluate_model(models['RGB-Geometric'], 'RGB-Geometric', rgb_geo_loader, criterion,
-                                                   is_rgbd=False, needs_geometry=True)
-    
-    if rgbd_loader is not None:
-        if models['RGBD-Geometric'] is not None:
-            results['RGBD-Geometric'] = evaluate_model(models['RGBD-Geometric'], 'RGBD-Geometric', rgbd_loader, criterion,
-                                                        is_rgbd=True, needs_geometry=True)
+    if rgbd_loader is not None and models['RGBD'] is not None:
+        results['RGBD'] = evaluate_model(models['RGBD'], 'RGBD', rgbd_loader, criterion,
+                                          is_rgbd=True, needs_geometry=True)
     
     # Print results
     print("\nResults:")

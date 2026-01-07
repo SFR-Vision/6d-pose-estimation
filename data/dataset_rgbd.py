@@ -12,8 +12,8 @@ from torch.utils.data import Dataset
 
 class LineMODDatasetRGBD(Dataset):
     """
-    LineMOD dataset with RGB and depth support.
-    Returns: rgb, depth, depth_raw, quaternion, translation, obj_id, bbox_center, camera_matrix
+    LineMOD dataset with RGB, depth, and mask support (5-channel input).
+    Returns: rgbdm (5ch), z_sensor, quaternion, translation, obj_id, bbox_center, camera_matrix
     """
     
     def __init__(self, root_dir, mode='train', transform=None, img_size=224):
@@ -68,9 +68,14 @@ class LineMODDatasetRGBD(Dataset):
                 if frame_id in gts and frame_id in infos:
                     for anno in gts[frame_id]:
                         if str(int(anno['obj_id'])).zfill(2) == obj_folder:
+                            mask_path = os.path.join(base_path, 'mask', img_name)
+                            # Skip samples without masks
+                            if not os.path.exists(mask_path):
+                                continue
                             self.all_data.append({
                                 'img_path': os.path.join(rgb_path, img_name),
                                 'depth_path': os.path.join(depth_path, img_name),
+                                'mask_path': mask_path,
                                 'obj_id': int(obj_folder) - 1,
                                 'bbox': anno['obj_bb'],
                                 'cam_R_m2c': anno['cam_R_m2c'],
@@ -99,6 +104,15 @@ class LineMODDatasetRGBD(Dataset):
         depth_float = depth_image.astype(np.float32)
         depth_float = cv2.bilateralFilter(depth_float, 5, 75, 75)
         depth_image = depth_float.astype(np.uint16)
+        
+        # Load mask
+        if not os.path.exists(item['mask_path']):
+            raise FileNotFoundError(f"Mask file not found: {item['mask_path']}")
+        mask = cv2.imread(item['mask_path'], cv2.IMREAD_GRAYSCALE)
+        if mask is None:
+            raise FileNotFoundError(f"Failed to load mask: {item['mask_path']}")
+        # Normalize to [0, 1]
+        mask = (mask > 127).astype(np.float32)
         
         # Ground truth
         gt_rot_mat = np.array(item['cam_R_m2c']).reshape(3, 3)
@@ -137,12 +151,15 @@ class LineMODDatasetRGBD(Dataset):
                                            cv2.BORDER_CONSTANT, value=0)
             depth_image = cv2.copyMakeBorder(depth_image, pad_t, pad_b, pad_l, pad_r,
                                             cv2.BORDER_CONSTANT, value=0)
+            mask = cv2.copyMakeBorder(mask, pad_t, pad_b, pad_l, pad_r,
+                                     cv2.BORDER_CONSTANT, value=0)
             x1 += pad_l
             y1 += pad_t
 
         # Crop
         rgb_crop = rgb_image[y1:y1+size, x1:x1+size]
         depth_crop = depth_image[y1:y1+size, x1:x1+size]
+        mask_crop = mask[y1:y1+size, x1:x1+size]
 
         if rgb_crop.shape[:2] != (size, size) or depth_crop.shape[:2] != (size, size):
             raise RuntimeError(f"Crop size mismatch: rgb {rgb_crop.shape}, depth {depth_crop.shape}, expected ({size}, {size})")
@@ -166,9 +183,10 @@ class LineMODDatasetRGBD(Dataset):
             z_sensor = 0.5  # fallback
         z_sensor = np.clip(z_sensor, 0.1, 2.0)
 
-        # Resize (use nearest for depth to avoid blending metric values)
+        # Resize (use nearest for depth and mask to avoid blending metric values)
         rgb_crop = cv2.resize(rgb_crop, (self.img_size, self.img_size))
         depth_crop_resized = cv2.resize(depth_crop, (self.img_size, self.img_size), interpolation=cv2.INTER_NEAREST)
+        mask_crop_resized = cv2.resize(mask_crop, (self.img_size, self.img_size), interpolation=cv2.INTER_NEAREST)
 
         # Process resized depth for CNN
         depth_crop_resized = depth_crop_resized.astype(np.float32)
@@ -189,15 +207,23 @@ class LineMODDatasetRGBD(Dataset):
         quaternion = torch.tensor(r.as_quat(), dtype=torch.float32)
         obj_id = torch.tensor(item['obj_id'], dtype=torch.long)
 
-        # Apply transforms
+        # Convert RGB to tensor (HWC -> CHW) before applying transform
+        rgb_tensor = torch.from_numpy(rgb_crop).permute(2, 0, 1).float() / 255.0
+        
+        # Apply transforms to RGB tensor only (expects Normalize, not ToTensor)
         if self.transform:
-            rgb_crop = self.transform(rgb_crop)
+            rgb_tensor = self.transform(rgb_tensor)
 
-        # Convert to tensors
-        depth_crop_tensor = torch.from_numpy(depth_crop_normalized).permute(2, 0, 1).float()
-        depth_raw_tensor = torch.from_numpy(depth_raw_meters).float()
+        # Convert other channels to tensors
+        depth_crop_tensor = torch.from_numpy(depth_crop_normalized).permute(2, 0, 1).float()  # (1, H, W)
+        mask_tensor = torch.from_numpy(mask_crop_resized).unsqueeze(0).float()  # (1, H, W)
         z_sensor_tensor = torch.tensor(z_sensor, dtype=torch.float32)
         bbox_center_tensor = torch.from_numpy(bbox_center).float()
-        cam_K_tensor = torch.from_numpy(cam_K).float()  # Use original K
+        
+        # Convert camera matrix to [fx, fy, cx, cy] format
+        camera_matrix = torch.tensor([cam_K[0, 0], cam_K[1, 1], cam_K[0, 2], cam_K[1, 2]], dtype=torch.float32)
+        
+        # Concatenate RGB (3) + Depth (1) + Mask (1) → 5 channels
+        rgbdm_tensor = torch.cat([rgb_tensor, depth_crop_tensor, mask_tensor], dim=0)  # (5, H, W)
 
-        return rgb_crop, depth_crop_tensor, depth_raw_tensor, z_sensor_tensor, quaternion, translation, obj_id, bbox_center_tensor, cam_K_tensor
+        return rgbdm_tensor, z_sensor_tensor, quaternion, translation, obj_id, bbox_center_tensor, camera_matrix

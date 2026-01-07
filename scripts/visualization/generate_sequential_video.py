@@ -17,8 +17,7 @@ from scipy.spatial.transform import Rotation as R
 from torchvision import transforms
 
 from models.pose_net_rgb import PoseNetRGB
-from models.pose_net_rgb_geometric import PoseNetRGBGeometric
-from models.pose_net_rgbd_geometric import PoseNetRGBDGeometric
+from models.pose_net_rgbd import PoseNetRGBD
 from utils.mesh_utils import load_mesh_corners
 from utils.visualization import project_points, draw_3d_box
 from utils.camera import DEFAULT_K
@@ -29,12 +28,9 @@ def load_model(model_type, device):
     if model_type == "rgb":
         model = PoseNetRGB(pretrained=True)
         weights_path = os.path.join(PROJECT_ROOT, "weights_rgb", "best_pose_model.pth")
-    elif model_type == "rgb_geometric":
-        model = PoseNetRGBGeometric(pretrained=True)
-        weights_path = os.path.join(PROJECT_ROOT, "weights_rgb_geometric", "best_pose_model.pth")
-    elif model_type == "rgbd_geometric":
-        model = PoseNetRGBDGeometric(pretrained=True)
-        weights_path = os.path.join(PROJECT_ROOT, "weights_rgbd_geometric", "best_pose_model.pth")
+    elif model_type == "rgbd":
+        model = PoseNetRGBD(pretrained=True)
+        weights_path = os.path.join(PROJECT_ROOT, "weights_rgbd", "best_pose_model.pth")
     else:
         raise ValueError(f"Unknown model type: {model_type}")
     
@@ -111,7 +107,7 @@ def compute_add(model_points, pred_rot, pred_trans, gt_rot, gt_trans):
 
 
 def run_inference(model, model_type, rgb, depth, bbox, camera_matrix, obj_id, device):
-    """Run inference on a single frame using same logic as inference_rgbd_geometric.py."""
+    """Run inference on a single frame using same logic as inference_rgbd.py."""
     # Prepare input
     transform = transforms.Compose([
         transforms.ToPILImage(),
@@ -162,18 +158,15 @@ def run_inference(model, model_type, rgb, depth, bbox, camera_matrix, obj_id, de
     # Prepare inputs based on model type
     with torch.no_grad():
         if model_type == "rgb":
-            pred_rot, pred_trans = model(rgb_tensor)
-        elif model_type == "rgb_geometric":
-            # Use original bbox center (not crop center)
+            # RGB model needs: rgbm (4ch), bbox_center, camera_matrix
             bbox_center_orig = np.array([cx, cy], dtype=np.float32)
             bbox_center = torch.from_numpy(bbox_center_orig).unsqueeze(0).to(device)
-            # Build 3x3 camera matrix
-            cam_K = torch.tensor([[[camera_matrix[0], 0, camera_matrix[2]],
-                                    [0, camera_matrix[1], camera_matrix[3]],
-                                    [0, 0, 1]]], dtype=torch.float32).to(device)
-            pred_rot, pred_trans = model(rgb_tensor, bbox_center, cam_K)
-        elif model_type == "rgbd_geometric":
-            # Prepare depth
+            cam_matrix_flat = torch.tensor([[camera_matrix[0], camera_matrix[1], 
+                                             camera_matrix[2], camera_matrix[3]]], 
+                                           dtype=torch.float32).to(device)
+            pred_rot, pred_trans = model(rgb_tensor, bbox_center, cam_matrix_flat)
+        elif model_type == "rgbd":
+            # RGBD model needs: rgbdm (5ch), z_sensor, bbox_center, camera_matrix
             if depth is None or padded_depth is None:
                 return None, None
             
@@ -193,16 +186,26 @@ def run_inference(model, model_type, rgb, depth, bbox, camera_matrix, obj_id, de
             depth_normalized = np.clip(depth_normalized, 0, 1)
             depth_normalized[depth_meters < 0.01] = 0
             
-            # Prepare tensors (same as inference script)
+            # Prepare tensors
             depth_tensor = torch.from_numpy(depth_normalized).unsqueeze(0).unsqueeze(0).float().to(device)
             bbox_center = torch.from_numpy(bbox_center_orig).unsqueeze(0).to(device)
-            # Build 3x3 camera matrix
-            cam_K = torch.tensor([[[camera_matrix[0], 0, camera_matrix[2]],
-                                    [0, camera_matrix[1], camera_matrix[3]],
-                                    [0, 0, 1]]], dtype=torch.float32).to(device)
+            cam_matrix_flat = torch.tensor([[camera_matrix[0], camera_matrix[1], 
+                                             camera_matrix[2], camera_matrix[3]]], 
+                                           dtype=torch.float32).to(device)
             
-            # Model predicts Z from RGB+depth, pass None for z_sensor
-            pred_rot, pred_trans = model(rgb_tensor, depth_tensor, None, bbox_center, cam_K)
+            # Extract z_sensor (measured depth at bbox center)
+            z_sensor_val = crop_depth_resized[img_size//2, img_size//2] / 1000.0
+            z_sensor = torch.tensor([[z_sensor_val]], dtype=torch.float32).to(device)
+            
+            # TODO: Add mask support once YOLO-seg integration is complete
+            # For now, create dummy mask (all ones)
+            mask_tensor = torch.ones(1, 1, img_size, img_size).to(device)
+            
+            # Concatenate RGB + Depth + Mask (5 channels)
+            rgbdm = torch.cat([rgb_tensor, depth_tensor, mask_tensor], dim=1)
+            
+            # RGBD model forward pass
+            pred_rot, pred_trans = model(rgbdm, z_sensor, bbox_center, cam_matrix_flat)
     
     pred_rot = pred_rot[0].cpu().numpy()
     pred_trans = pred_trans[0].cpu().numpy()
@@ -309,7 +312,7 @@ def generate_video(model_type, object_id, fps=30, output_dir=None, frame_duplica
     output_path = os.path.join(output_dir, f"sequential_{model_type}_obj{object_id}_fps{fps}.mp4")
     
     # Get frame size from first frame
-    first_rgb, _ = load_frame(obj_folder, all_frames[0], load_depth=(model_type == "rgbd_geometric"))
+    first_rgb, _ = load_frame(obj_folder, all_frames[0], load_depth=(model_type == "rgbd"))
     h, w = first_rgb.shape[:2]
     
     # Setup video writer - try different codecs for best compatibility
@@ -329,7 +332,7 @@ def generate_video(model_type, object_id, fps=30, output_dir=None, frame_duplica
     print(f"\nProcessing {len(all_frames)} frames...")
     for frame_idx in tqdm(all_frames):
         # Load frame
-        rgb, depth = load_frame(obj_folder, frame_idx, load_depth=(model_type == "rgbd_geometric"))
+        rgb, depth = load_frame(obj_folder, frame_idx, load_depth=(model_type == "rgbd"))
         if rgb is None:
             skipped_frames.append(frame_idx)
             continue
@@ -406,7 +409,7 @@ def generate_video(model_type, object_id, fps=30, output_dir=None, frame_duplica
 def main():
     parser = argparse.ArgumentParser(description='Generate sequential video with GT vs predicted poses')
     parser.add_argument('--model', type=str, required=True, 
-                        choices=['rgb', 'rgb_geometric', 'rgbd_geometric'],
+                        choices=['rgb', 'rgbd'],
                         help='Model type to use')
     parser.add_argument('--object', type=str, required=True,
                         help='Object ID (e.g., "01" for ape)')

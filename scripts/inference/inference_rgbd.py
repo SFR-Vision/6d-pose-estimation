@@ -1,4 +1,4 @@
-"""Inference script for RGBD Geometric Model with YOLO Detection."""
+"""Inference script for RGBD Model (5-channel) with YOLO Segmentation."""
 
 import os
 import sys
@@ -16,15 +16,15 @@ from scipy.spatial.transform import Rotation as R
 from torchvision import transforms
 from ultralytics import YOLO
 
-from models.pose_net_rgbd_geometric import PoseNetRGBDGeometric
+from models.pose_net_rgbd import PoseNetRGBD
 from utils.mesh_utils import load_mesh_corners
 from utils.visualization import project_points, draw_3d_box, draw_axes
 from utils.camera import DEFAULT_K
 from utils.inference_utils import load_ground_truth, load_model_points, compute_add, parse_image_filename
 
 # Configuration
-YOLO_PATH = os.path.join(PROJECT_ROOT, "runs", "detect", "linemod_yolo", "weights", "best.pt")
-WEIGHTS_PATH = os.path.join(PROJECT_ROOT, "weights_rgbd_geometric", "best_pose_model.pth")
+YOLO_PATH = os.path.join(PROJECT_ROOT, "runs", "segment", "linemod_yolo_seg", "weights", "best.pt")
+WEIGHTS_PATH = os.path.join(PROJECT_ROOT, "weights_rgbd", "best_pose_model.pth")
 MESH_DIR = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "models")
 DATA_ROOT = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "data")
 TEST_DIR = os.path.join(PROJECT_ROOT, "datasets", "yolo_ready", "images", "test")
@@ -62,7 +62,7 @@ def run_inference(img_path, depth_path=None):
         return
         
     yolo = YOLO(YOLO_PATH)
-    model = PoseNetRGBDGeometric(pretrained=False).to(device)
+    model = PoseNetRGBD(pretrained=False).to(device)
     checkpoint = torch.load(WEIGHTS_PATH, map_location=device, weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()

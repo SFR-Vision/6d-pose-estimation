@@ -10,8 +10,8 @@ Key features from the paper:
 3. Save directions to file for reproducibility
 
 Usage:
-    python scripts/visualization/loss_landscape.py --model rgb_geometric --grid 25
-    python scripts/visualization/loss_landscape.py --model rgb_geometric --grid 50 --sample 0.2
+    python scripts/visualization/loss_landscape.py --model rgb --grid 25
+    python scripts/visualization/loss_landscape.py --model rgbd --grid 50 --sample 0.2
 
 WARNING: This script is computationally expensive!
     - 25x25 grid = ~625 forward passes (~30-60 min)
@@ -39,11 +39,10 @@ import h5py
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, PROJECT_ROOT)
 
-from data.dataset_rgb import LineMODDatasetRGB, LineMODDatasetRGBGeometric
+from data.dataset_rgb import LineMODDatasetRGB
 from data.dataset_rgbd import LineMODDatasetRGBD
-from models.pose_net_rgb_geometric import PoseNetRGBGeometric
 from models.pose_net_rgb import PoseNetRGB
-from models.pose_net_rgbd_geometric import PoseNetRGBDGeometric
+from models.pose_net_rgbd import PoseNetRGBD
 from models.pose_loss import PoseLoss
 
 
@@ -66,14 +65,9 @@ def get_model_and_loader(model_type):
         weights_dir = os.path.join(PROJECT_ROOT, "weights_rgb")
         dataset = LineMODDatasetRGB(DATA_ROOT, mode='train', transform=transform)
         is_rgbd = False
-    elif model_type == 'rgb_geometric':
-        model = PoseNetRGBGeometric(pretrained=False)
-        weights_dir = os.path.join(PROJECT_ROOT, "weights_rgb_geometric")
-        dataset = LineMODDatasetRGBGeometric(DATA_ROOT, mode='train', transform=transform)
-        is_rgbd = False
-    elif model_type == 'rgbd_geometric':
-        model = PoseNetRGBDGeometric(pretrained=False)
-        weights_dir = os.path.join(PROJECT_ROOT, "weights_rgbd_geometric")
+    elif model_type == 'rgbd':
+        model = PoseNetRGBD(pretrained=False)
+        weights_dir = os.path.join(PROJECT_ROOT, "weights_rgbd")
         dataset = LineMODDatasetRGBD(DATA_ROOT, mode='train', transform=transform)
         is_rgbd = True
     else:
@@ -171,27 +165,24 @@ def compute_loss(model, loader, criterion, is_rgbd, device, max_batches=None):
                 break
             
             if is_rgbd:
-                rgb, depth, depth_raw, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix = batch
-                rgb = rgb.to(device)
-                depth = depth.to(device)
-                depth_raw = depth_raw.to(device)
+                # RGBD: (rgbdm_5ch, z_sensor, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix)
+                rgbdm, z_sensor, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix = batch
+                rgbdm = rgbdm.to(device)
+                z_sensor = z_sensor.to(device)
                 gt_rot = gt_rot.to(device)
                 gt_trans = gt_trans.to(device)
                 bbox_center = bbox_center.to(device)
                 cam_matrix = cam_matrix.to(device)
-                pred_rot, pred_trans = model(rgb, depth, depth_raw, bbox_center, cam_matrix)
+                pred_rot, pred_trans = model(rgbdm, z_sensor, bbox_center, cam_matrix)
             else:
-                rgb, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix = batch
-                rgb = rgb.to(device)
+                # RGB: (rgbm_4ch, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix)
+                rgbm, gt_rot, gt_trans, obj_ids, bbox_center, cam_matrix = batch
+                rgbm = rgbm.to(device)
                 gt_rot = gt_rot.to(device)
                 gt_trans = gt_trans.to(device)
                 bbox_center = bbox_center.to(device)
                 cam_matrix = cam_matrix.to(device)
-                
-                if hasattr(model, 'fc_trans_z'):  # RGB-Geometric
-                    pred_rot, pred_trans = model(rgb, bbox_center, cam_matrix)
-                else:  # RGB
-                    pred_rot, pred_trans = model(rgb)
+                pred_rot, pred_trans = model(rgbm, bbox_center, cam_matrix)
             
             loss = criterion(pred_rot, pred_trans, gt_rot, gt_trans)
             total_loss += loss.item()
@@ -226,7 +217,7 @@ def create_loss_landscape(model_type, grid_size=25, range_val=1.0, sample_ratio=
     Li et al. "Visualizing the Loss Landscape of Neural Nets" (NIPS 2018)
     
     Args:
-        model_type: 'rgb', 'rgb_geometric', or 'rgbd_geometric'
+        model_type: 'rgb' or 'rgbd'
         grid_size: Number of points in each direction (grid_size x grid_size total)
         range_val: Range of alpha/beta values [-range_val, +range_val]
         sample_ratio: Fraction of training data to use (for speed)
@@ -387,8 +378,8 @@ def main():
         description='Visualize loss landscape using filter-normalized random directions',
         epilog='Based on: Li et al. "Visualizing the Loss Landscape of Neural Nets" (NIPS 2018)'
     )
-    parser.add_argument('--model', type=str, default='rgb_geometric',
-                        choices=['rgb', 'rgb_geometric', 'rgbd_geometric'],
+    parser.add_argument('--model', type=str, default='rgb',
+                        choices=['rgb', 'rgbd'],
                         help='Model type to visualize')
     parser.add_argument('--grid', type=int, default=25,
                         help='Grid size (default: 25, meaning 25x25=625 points)')
