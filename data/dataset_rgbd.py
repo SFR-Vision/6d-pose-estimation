@@ -168,6 +168,7 @@ class LineMODDatasetRGBD(Dataset):
         bbox_center = bbox_center_gt.copy()
 
         # Sample sensor Z from native-resolution crop center before any resize
+        # Use mask to only sample from object pixels (not background)
         depth_native_meters = depth_crop.astype(np.float32) / 1000.0
         center_y, center_x = size // 2, size // 2
         region = 5
@@ -176,11 +177,19 @@ class LineMODDatasetRGBD(Dataset):
         x1_region = max(0, center_x - region)
         x2_region = min(size, center_x + region + 1)
         depth_center_region = depth_native_meters[y1_region:y2_region, x1_region:x2_region]
-        valid_mask = depth_center_region > 0.01
+        mask_center_region = mask_crop[y1_region:y2_region, x1_region:x2_region]
+        
+        # Only use depth from object pixels (mask > 0.5) that have valid depth readings
+        valid_mask = (depth_center_region > 0.01) & (mask_center_region > 0.5)
         if valid_mask.sum() > 0:
             z_sensor = np.median(depth_center_region[valid_mask])
         else:
-            z_sensor = 0.5  # fallback
+            # Fallback to any valid depth if no masked pixels
+            valid_depth = depth_center_region > 0.01
+            if valid_depth.sum() > 0:
+                z_sensor = np.median(depth_center_region[valid_depth])
+            else:
+                z_sensor = 0.5  # final fallback
         z_sensor = np.clip(z_sensor, 0.1, 2.0)
 
         # Resize (use nearest for depth and mask to avoid blending metric values)

@@ -95,11 +95,8 @@ def main():
     
     criterion = ADDLoss(MODEL_DIR, DEVICE)
     
-    val_transform = transforms.Compose([
-        transforms.ToPILImage(),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
+    # Transform (datasets handle ToTensor internally)
+    val_transform = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     
     # Load datasets (always use test split for comparisons)
     print("Loading datasets...")

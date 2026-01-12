@@ -13,9 +13,9 @@ import cv2
 import matplotlib.pyplot as plt
 from ultralytics import YOLO
 
-# Configuration
-MODEL_PATH = os.path.join("runs", "detect", "linemod_yolo", "weights", "best.pt")
-TEST_DIR = os.path.join("datasets", "yolo_ready", "images", "test")
+# Configuration - use YOLO segmentation model
+MODEL_PATH = os.path.join("runs", "segment", "linemod_yolo_seg", "weights", "best.pt")
+TEST_DIR = os.path.join("datasets", "yolo_seg_ready", "images", "test")
 
 
 def visualize_results(num_samples=4):
@@ -30,7 +30,7 @@ def visualize_results(num_samples=4):
         print(f"Error: Test folder not found at {TEST_DIR}")
         return
 
-    images = [f for f in os.listdir(TEST_DIR) if f.endswith(".png")]
+    images = [f for f in os.listdir(TEST_DIR) if f.endswith(".jpg")]
     
     if len(images) == 0:
         print("No images found in test folder")

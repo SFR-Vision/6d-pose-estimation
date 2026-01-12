@@ -1,17 +1,16 @@
-RGB-Geometric 4-Channel Model Training Summary
-============================================================
+RGB Model Training Summary
+========================================
 
-Total Epochs: 75
-
-Best ADD Error:      32.65 mm (Epoch 68)
-Best ACC@2cm:        42.22% (Epoch 68)
-Best Val Loss:       0.2348 (Epoch 73)
+Best ADD Error:    31.67 mm (Epoch 72)
+Best ACC@2cm:      43.07% (Epoch 72)
+Best Val Loss:     -0.9226 (Epoch 74)
 
 Final Results (Epoch 75):
-  ADD Error:         32.89 mm
-  ACC@2cm:           40.05%
-  ACC@5cm:           60.16%
-  Train Loss:        0.1924
-  Val Loss:          0.2368
+  - ADD Error:     31.83 mm
+  - ACC@2cm:       41.89%
+  - Train Loss:    -0.9432
+  - Val Loss:      -0.9224
 
-Improvement from Epoch 1:
+Improvement:
+  - ADD: 126.6 -> 31.7 mm (75.0% better)
+  - ACC@2cm: 3.5% -> 43.1%

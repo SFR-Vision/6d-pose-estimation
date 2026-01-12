@@ -146,12 +146,8 @@ def main():
     add_loss = ADDLoss(MODEL_DIR, DEVICE)
     print(f"  Loaded models\n")
     
-    # Transforms
-    val_transform = transforms.Compose([
-        transforms.ToPILImage(),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
+    # Transforms (datasets handle ToTensor internally)
+    val_transform = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     
     # Load datasets
     print("Loading datasets...")

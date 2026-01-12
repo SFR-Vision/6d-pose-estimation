@@ -142,10 +142,10 @@ def plot_training_history(weights_dir, model_name=None):
         improvement = val_add[0] - min(val_add)
         pct_improvement = (improvement / val_add[0]) * 100
         summary_text += f"\nImprovement:\n"
-        summary_text += f"  - ADD: {val_add[0]:.1f} → {min(val_add):.1f} mm ({pct_improvement:.1f}% better)\n"
+        summary_text += f"  - ADD: {val_add[0]:.1f} -> {min(val_add):.1f} mm ({pct_improvement:.1f}% better)\n"
     
     if val_acc_2cm and len(val_acc_2cm) > 1:
-        summary_text += f"  - ACC@2cm: {val_acc_2cm[0]:.1f}% → {max(val_acc_2cm):.1f}%\n"
+        summary_text += f"  - ACC@2cm: {val_acc_2cm[0]:.1f}% -> {max(val_acc_2cm):.1f}%\n"
     
     ax.text(0.05, 0.95, summary_text, transform=ax.transAxes, fontsize=10,
             verticalalignment='top', fontfamily='monospace',
@@ -161,7 +161,7 @@ def plot_training_history(weights_dir, model_name=None):
     
     # Also save summary text
     summary_path = os.path.join(weights_dir, 'training_summary.txt')
-    with open(summary_path, 'w') as f:
+    with open(summary_path, 'w', encoding='utf-8') as f:
         f.write(f"{model_name} Model Training Summary\n")
         f.write("=" * 40 + "\n\n")
         f.write(summary_text.replace("Performance Summary\n" + "-" * 30 + "\n\n", ""))

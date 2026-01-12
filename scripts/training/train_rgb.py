@@ -40,9 +40,8 @@ CKPT_BEST = os.path.join(SAVE_DIR, 'best_pose_model.pth')
 def train():
     print(f"Training RGB model on {DEVICE}")
 
-    # Data transforms with color jittering augmentation (Bag of Tricks)
+    # Data transforms
     train_transform = transforms.Compose([
-        transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 

@@ -1,0 +1,16 @@
+RGBD Model Training Summary
+========================================
+
+Best ADD Error:    13.86 mm (Epoch 61)
+Best ACC@2cm:      84.51% (Epoch 54)
+Best Val Loss:     -0.9543 (Epoch 73)
+
+Final Results (Epoch 75):
+  - ADD Error:     13.90 mm
+  - ACC@2cm:       84.22%
+  - Train Loss:    -0.9685
+  - Val Loss:      -0.9543
+
+Improvement:
+  - ADD: 37.9 -> 13.9 mm (63.4% better)
+  - ACC@2cm: 32.3% -> 84.5%

@@ -126,11 +126,7 @@ def run_inference(img_path, depth_path=None):
         if gt_rot is not None:
             print(f"Ground truth loaded for object {file_obj_id}, frame {frame_id}")
     
-    transform = transforms.Compose([
-        transforms.ToPILImage(),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
+    transform = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     
     img_size = 224
     
@@ -165,30 +161,70 @@ def run_inference(img_path, depth_path=None):
         crop_rgb = padded_rgb[adj_y1:adj_y1+crop_size, adj_x1:adj_x1+crop_size]
         crop_depth = padded_depth[adj_y1:adj_y1+crop_size, adj_x1:adj_x1+crop_size]
         
-
         crop_rgb_resized = cv2.resize(crop_rgb, (img_size, img_size))
-        crop_depth_resized = cv2.resize(crop_depth.astype(np.float32), (img_size, img_size))
+        crop_depth_resized = cv2.resize(crop_depth.astype(np.float32), (img_size, img_size), interpolation=cv2.INTER_NEAREST)
         
         # Use original bbox center and K (consistent with dataset_rgbd.py)
         bbox_center_orig = np.array([c_x_box, c_y_box], dtype=np.float32)
         
-        # Normalize depth for CNN input (same as training)
+        # Compute z_sensor from depth at center (matching dataset_rgbd.py)
         depth_meters = crop_depth_resized / 1000.0
+        center = img_size // 2
+        region = 5
+        depth_center_region = depth_meters[center-region:center+region+1, center-region:center+region+1]
+        valid_mask = depth_center_region > 0.01
+        if valid_mask.sum() > 0:
+            z_sensor = np.median(depth_center_region[valid_mask])
+        else:
+            z_sensor = 0.5  # fallback
+        z_sensor = np.clip(z_sensor, 0.1, 2.0)
+        
+        # Normalize depth for CNN input (same as training)
         depth_min, depth_max = 0.1, 2.0
         depth_normalized = (depth_meters - depth_min) / (depth_max - depth_min)
         depth_normalized = np.clip(depth_normalized, 0, 1)
         depth_normalized[depth_meters < 0.01] = 0
         
-        # Prepare inputs
-        input_rgb = transform(crop_rgb_resized).unsqueeze(0).to(device)
-        # Depth normalized: add channel dim [224, 224] -> [1, 224, 224] -> [1, 1, 224, 224]
-        input_depth = torch.from_numpy(depth_normalized).unsqueeze(0).unsqueeze(0).float().to(device)
-        bbox_center = torch.from_numpy(bbox_center_orig).float().unsqueeze(0).to(device)
-        cam_matrix = torch.tensor(K, dtype=torch.float32).unsqueeze(0).to(device)
+        # Create mask from YOLO segmentation if available, otherwise use simple threshold
+        if hasattr(results[0], 'masks') and results[0].masks is not None:
+            try:
+                # Get mask for this detection
+                mask_data = results[0].masks.data[results[0].boxes.cls == cls_id]
+                if len(mask_data) > 0:
+                    mask_full = mask_data[0].cpu().numpy()
+                    mask_full = cv2.resize(mask_full, (w_img, h_img))
+                else:
+                    mask_full = np.ones((h_img, w_img), dtype=np.float32)
+            except:
+                mask_full = np.ones((h_img, w_img), dtype=np.float32)
+        else:
+            # Fallback: create mask from bounding box
+            mask_full = np.zeros((h_img, w_img), dtype=np.float32)
+            mask_full[y1:y2, x1:x2] = 1.0
         
-        # Pose inference (model predicts Z from RGB+depth, no z_sensor needed)
+        # Crop and resize mask
+        padded_mask = cv2.copyMakeBorder(mask_full, pad_t, pad_b, pad_l, pad_r, cv2.BORDER_CONSTANT, value=0)
+        crop_mask = padded_mask[adj_y1:adj_y1+crop_size, adj_x1:adj_x1+crop_size]
+        crop_mask_resized = cv2.resize(crop_mask, (img_size, img_size), interpolation=cv2.INTER_NEAREST)
+        
+        # Convert to tensors (matching dataset_rgbd.py preprocessing)
+        rgb_tensor = torch.from_numpy(crop_rgb_resized).permute(2, 0, 1).float() / 255.0
+        rgb_tensor = transform(rgb_tensor)  # Normalize
+        
+        depth_tensor = torch.from_numpy(depth_normalized).unsqueeze(0).float()  # (1, H, W)
+        mask_tensor = torch.from_numpy(crop_mask_resized).unsqueeze(0).float()  # (1, H, W)
+        
+        # Concatenate to 5-channel RGBDM tensor
+        rgbdm = torch.cat([rgb_tensor, depth_tensor, mask_tensor], dim=0)  # (5, H, W)
+        rgbdm = rgbdm.unsqueeze(0).to(device)  # (1, 5, H, W)
+        
+        z_sensor_tensor = torch.tensor([z_sensor], dtype=torch.float32).to(device)
+        bbox_center = torch.from_numpy(bbox_center_orig).float().unsqueeze(0).to(device)
+        cam_matrix = torch.tensor([K[0, 0], K[1, 1], K[0, 2], K[1, 2]], dtype=torch.float32).unsqueeze(0).to(device)
+        
+        # Pose inference
         with torch.no_grad():
-            pred_quat, pred_trans = model(input_rgb, input_depth, None, bbox_center, cam_matrix)
+            pred_quat, pred_trans = model(rgbdm, z_sensor_tensor, bbox_center, cam_matrix)
         
         pred_quat = pred_quat.cpu().numpy()[0]  # (4,)
         pred_trans = pred_trans.cpu().numpy().flatten()  # (3,)
