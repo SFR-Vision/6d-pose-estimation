@@ -1,0 +1,54 @@
+\section{Dataset}
+\label{sec:dataset}
+
+\paragraph{LineMOD Benchmark.}
+We evaluate our approach on the LineMOD dataset~\cite{hinterstoisser2012model}, a standard benchmark for 6D object pose estimation. The dataset contains 13 household objects with ground truth 6D poses and segmentation masks. Objects exhibit diverse geometric properties including varying sizes, symmetries, and surface characteristics.
+
+\paragraph{Objects.}
+The 13 objects (\cref{fig:qualitative}) in the dataset are:
+\begin{itemize}
+    \item \textbf{Asymmetric objects (11):} ape, benchvise, camera, can, cat, driller, duck, holepuncher, iron, lamp, phone
+    \item \textbf{Symmetric objects (2):} eggbox, glue (rotational symmetry)
+\end{itemize}
+For symmetric objects, we use the ADD-S metric instead of ADD during evaluation to account for pose ambiguity.
+
+\paragraph{Data Statistics.}
+We use the preprocessed version of LineMOD with the following split:
+\begin{center}
+\begin{tabular}{l|c}
+\textbf{Split} & \textbf{Images} \\
+\hline
+Training & 12,637 (80\%) \\
+Validation & 1,573 (10\%) \\
+Test & 1,573 (10\%) \\
+\hline
+Total & 15,783 \\
+\end{tabular}
+\end{center}
+
+\paragraph{Camera Intrinsics.}
+All images are captured with fixed camera parameters:
+\begin{center}
+\begin{tabular}{l|c}
+\textbf{Parameter} & \textbf{Value} \\
+\hline
+$f_x$ (focal length x) & 572.4 px \\
+$f_y$ (focal length y) & 573.6 px \\
+$c_x$ (principal point x) & 325.3 px \\
+$c_y$ (principal point y) & 242.0 px \\
+Image resolution & 640 $\times$ 480 \\
+\end{tabular}
+\end{center}
+
+\paragraph{Depth Statistics.}
+Analysis of the ground truth annotations reveals that object depths (Z-coordinate of object center) range from 0.51m to 1.45m. We use this information to optimize our depth prediction range to $[0.3, 1.7]$m, providing sufficient margin while focusing network capacity on the relevant depth range.
+
+\paragraph{Data Preprocessing.}
+For each training sample, we perform the following preprocessing:
+\begin{enumerate}
+    \item \textbf{Crop extraction:} A square crop centered on the ground truth bounding box with 1.2$\times$ padding is extracted from the full image.
+    \item \textbf{Resizing:} The crop is resized to 224$\times$224 pixels.
+    \item \textbf{RGB normalization:} RGB channels are normalized using ImageNet statistics (mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]).
+    \item \textbf{Mask binarization:} Segmentation masks are converted to binary (0 or 1).
+    \item \textbf{Depth preprocessing (RGB-D only):} Bilateral filtering is applied to reduce depth noise while preserving edges, followed by normalization to $[0,1]$ based on the range $[0.3, 1.7]$m.
+\end{enumerate}

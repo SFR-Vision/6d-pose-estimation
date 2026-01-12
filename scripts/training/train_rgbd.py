@@ -10,6 +10,7 @@ sys.path.insert(0, PROJECT_ROOT)
 
 import torch
 import torch.optim as optim
+from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR, SequentialLR
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from tqdm import tqdm
@@ -29,6 +30,7 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 BATCH_SIZE = 48
 EPOCHS = 75
 LEARNING_RATE = 1e-4
+WARMUP_EPOCHS = 5  # Learning rate warmup
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 CKPT_LAST = os.path.join(SAVE_DIR, "last_pose_model.pth")
@@ -64,7 +66,10 @@ def train():
     # Optimize both model and loss parameters
     optimizer = optim.AdamW(list(model.parameters()) + list(criterion.parameters()), 
                             lr=LEARNING_RATE, weight_decay=1e-4)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
+    # Learning rate warmup + cosine annealing
+    warmup_scheduler = LinearLR(optimizer, start_factor=0.1, total_iters=WARMUP_EPOCHS)
+    cosine_scheduler = CosineAnnealingLR(optimizer, T_max=EPOCHS - WARMUP_EPOCHS)
+    scheduler = SequentialLR(optimizer, [warmup_scheduler, cosine_scheduler], milestones=[WARMUP_EPOCHS])
     
     eval_criterion = ADDLoss(MODEL_DIR, DEVICE)
 

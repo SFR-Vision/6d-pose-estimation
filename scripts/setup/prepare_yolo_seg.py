@@ -174,19 +174,12 @@ def process_linemod_dataset():
         yaml.dump(yaml_content, f, default_flow_style=False)
     
     # Print summary
-    print("\n" + "=" * 60)
     print("Conversion Complete!")
-    print("=" * 60)
+    print("-" * 40)
     print(f"Train:   {stats['train']} samples")
     print(f"Val:     {stats['val']} samples")
     print(f"Test:    {stats['test']} samples")
     print(f"Skipped: {stats['skipped']} samples (no mask or invalid contour)")
-    print(f"\nDataset saved to: {OUTPUT_ROOT}")
-    print(f"Config file: {yaml_path}")
-    print("\nNext steps:")
-    print("1. Train YOLO-seg: yolo segment train data=datasets/yolo_seg_ready/dataset.yaml model=yolov8n-seg.pt epochs=100")
-    print("2. Or use: from ultralytics import YOLO; model = YOLO('yolov8n-seg.pt'); model.train(data='...', epochs=100)")
-
 
 if __name__ == "__main__":
     process_linemod_dataset()

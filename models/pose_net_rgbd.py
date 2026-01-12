@@ -145,7 +145,7 @@ class PoseNetRGBD(nn.Module):
         # Final depth = sensor reading + learned offset
         # z_sensor is surface depth, offset adjusts to object center
         z_pred = z_sensor + z_offset
-        z_pred = torch.clamp(z_pred, min=0.1, max=3.0)  # Ensure valid depth range
+        z_pred = torch.clamp(z_pred, min=0.3, max=1.7)  # Ensure valid depth range [0.3, 1.7]m
         
         # Geometric translation from predicted Z
         translation = self._compute_translation_geometric(z_pred, bbox_center, camera_matrix)

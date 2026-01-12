@@ -78,7 +78,7 @@ class PoseNetRGB(nn.Module):
             nn.Flatten()
         )
         
-        # Z-depth predictor
+        # Z-depth predictor (Sigmoid for bounded output)
         self.z_predictor = nn.Sequential(
             nn.Linear(256, 128),
             nn.ReLU(),
@@ -86,7 +86,7 @@ class PoseNetRGB(nn.Module):
             nn.Linear(128, 64),
             nn.ReLU(),
             nn.Linear(64, 1),
-            nn.Sigmoid()
+            nn.Sigmoid()  # Output [0, 1], scaled in forward()
         )
 
     def forward(self, rgbm, bbox_center, camera_matrix):
@@ -113,8 +113,8 @@ class PoseNetRGB(nn.Module):
         
         # Predict Z-depth from RGB+Mask
         z_features = self.z_backbone(rgbm)  # (B, 256)
-        z_norm = self.z_predictor(z_features).squeeze(-1)  # (B,)
-        pred_Z = z_norm * 1.5  # Scale to [0, 1.5] meters (LineMOD range)
+        z_norm = self.z_predictor(z_features).squeeze(-1)  # (B,) in [0, 1]
+        pred_Z = z_norm * 1.4 + 0.3  # Scale to [0.3, 1.7] meters (LineMOD range)
         
         # Geometric translation using pinhole camera model
         fx = camera_matrix[:, 0]

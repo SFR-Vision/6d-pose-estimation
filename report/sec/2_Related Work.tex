@@ -1,0 +1,17 @@
+\section{Related Work}
+\label{sec:related}
+
+6D object pose estimation has been extensively studied in computer vision. We review key approaches and position our work relative to the existing literature.
+
+\paragraph{Template-based Methods.}
+Early methods relied on matching observed image features to pre-computed templates of objects at various viewpoints. LineMOD~\cite{hinterstoisser2012model} introduced a multimodal template matching approach using color gradients and surface normals, establishing the benchmark dataset we use for evaluation. While effective for texture-rich objects, these methods struggle with occlusion and require extensive template databases.
+
+\paragraph{Keypoint-based Methods.}
+Several approaches frame pose estimation as 2D keypoint detection followed by Perspective-n-Point (PnP) solving. These methods predict heatmaps for distinctive 3D model keypoints projected onto the image, then recover pose through geometric optimization. While providing strong geometric consistency, keypoint-based methods can fail on textureless objects or under heavy occlusion.
+
+\paragraph{Direct Regression Methods.}
+PoseCNN~\cite{xiang2018posecnn} pioneered end-to-end deep learning for pose estimation, directly regressing object center, depth, and rotation from CNN features. This approach introduced the ADD metric that has become the standard for evaluation. We follow this direct regression paradigm but incorporate explicit geometric constraints for translation prediction rather than regressing all six degrees of freedom independently.
+
+\paragraph{RGB-D Fusion Methods.}
+DenseFusion~\cite{wang2019densefusion} proposed dense per-pixel feature fusion of RGB and depth modalities, achieving state-of-the-art results through iterative pose refinement. Our RGB-D model similarly combines appearance and depth cues, but employs a simpler dual-stream architecture that fuses features at the prediction stage. Rather than iterative refinement, we leverage depth as a geometric prior for the Z-translation component.
+

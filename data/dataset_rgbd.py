@@ -190,7 +190,7 @@ class LineMODDatasetRGBD(Dataset):
                 z_sensor = np.median(depth_center_region[valid_depth])
             else:
                 z_sensor = 0.5  # final fallback
-        z_sensor = np.clip(z_sensor, 0.1, 2.0)
+        z_sensor = np.clip(z_sensor, 0.3, 1.7)  # Match LineMOD depth range [0.51m-1.45m] with margin
 
         # Resize (use nearest for depth and mask to avoid blending metric values)
         rgb_crop = cv2.resize(rgb_crop, (self.img_size, self.img_size))
@@ -201,9 +201,9 @@ class LineMODDatasetRGBD(Dataset):
         depth_crop_resized = depth_crop_resized.astype(np.float32)
         depth_raw_meters = depth_crop_resized / 1000.0
 
-        # Normalize depth for CNN input (expanded range to 2.0m)
-        depth_min = 0.1
-        depth_max = 2.0
+        # Normalize depth for CNN input (based on actual LineMOD depth range)
+        depth_min = 0.3
+        depth_max = 1.7
         depth_crop_normalized = (depth_raw_meters - depth_min) / (depth_max - depth_min)
         depth_crop_normalized = np.clip(depth_crop_normalized, 0, 1)
         depth_crop_normalized[depth_raw_meters < 0.01] = 0
