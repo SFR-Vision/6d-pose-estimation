@@ -271,8 +271,12 @@ def main():
     print("\n* = Symmetric object (uses ADD-S metric)")
     print("=" * 80)
     
-    # Show Excel-like GUI table
-    show_excel_table(all_results, model_names, all_obj_ids)
+    # Show Excel-like GUI table (skip in headless environments like Colab)
+    try:
+        show_excel_table(all_results, model_names, all_obj_ids)
+    except Exception as e:
+        # GUI not available (headless/Colab environment)
+        pass
 
 
 def show_excel_table(all_results, model_names, all_obj_ids):
