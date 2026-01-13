@@ -92,11 +92,14 @@ def run_inference(img_path):
     
     # Parse image filename to get GT info
     file_obj_id, frame_id = parse_image_filename(img_path)
+    print(f"Parsed: obj_id={file_obj_id}, frame_id={frame_id}")
     gt_rot, gt_trans = None, None
-    if file_obj_id and frame_id:
+    if file_obj_id and frame_id is not None:
         gt_rot, gt_trans = load_ground_truth(DATA_ROOT, file_obj_id, frame_id)
         if gt_rot is not None:
             print(f"Ground truth loaded for object {file_obj_id}, frame {frame_id}")
+        else:
+            print(f"Ground truth not found for object {file_obj_id}, frame {frame_id}")
     
     # RGB normalization transform
     transform = transforms.Compose([
