@@ -166,7 +166,7 @@ def main():
     models = {}
     for name, path in WEIGHTS.items():
         models[name] = load_pose_model(name, path)
-        status = "✓" if models[name] is not None else "✗"
+        status = "OK" if models[name] is not None else "MISSING"
         print(f"  {name}: {status}")
     print()
     
@@ -460,9 +460,9 @@ def show_excel_table(all_results, model_names, all_obj_ids):
                         avg_row.append('N/A')
                 f.write(','.join(avg_row) + '\n')
             
-            export_label.config(text="✓ Exported to per_object_ADD_metrics.csv and per_object_accuracy_metrics.csv", foreground='green')
+            export_label.config(text="Exported to per_object_ADD_metrics.csv and per_object_accuracy_metrics.csv", foreground='green')
         except Exception as e:
-            export_label.config(text=f"✗ Export failed: {e}", foreground='red')
+            export_label.config(text=f"Export failed: {e}", foreground='red')
     
     export_btn = ttk.Button(button_frame, text="Export to CSV", command=export_to_csv)
     export_btn.pack(side='left', padx=5)

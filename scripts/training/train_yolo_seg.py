@@ -94,7 +94,7 @@ def train():
     print(f"  Precision: {metrics.seg.mp:.4f}")
     print(f"  Recall: {metrics.seg.mr:.4f}")
     
-    print(f"\n📊 Training plots saved to: {SAVE_DIR}")
+    print(f"\nTraining plots saved to: {SAVE_DIR}")
 
 
 if __name__ == "__main__":
