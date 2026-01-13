@@ -26,7 +26,7 @@ YOLO_PATH = os.path.join(PROJECT_ROOT, "runs", "segment", "linemod_yolo_seg", "w
 WEIGHTS_PATH = os.path.join(PROJECT_ROOT, "weights_rgb", "best_pose_model.pth")
 MESH_DIR = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "models")
 DATA_ROOT = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "data")
-TEST_DIR = os.path.join(PROJECT_ROOT, "datasets", "yolo_ready", "images", "test")
+OBJECTS = ['01', '02', '04', '05', '06', '08', '09', '10', '11', '12', '13', '14', '15']
 
 CLASS_ID_TO_OBJ_NAME = {
     0: "01", 1: "02", 2: "04", 3: "05", 4: "06", 5: "08",
@@ -230,18 +230,12 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         TEST_IMG = sys.argv[1]
     else:
-        # Select random test image
-        if os.path.exists(TEST_DIR):
-            files = [f for f in os.listdir(TEST_DIR) if f.endswith('.png') or f.endswith('.jpg')]
-            if len(files) > 0:
-                random_file = np.random.choice(files)
-                TEST_IMG = os.path.join(TEST_DIR, random_file)
-                print(f"Selected: {random_file}")
-            else:
-                print(f"No images found in {TEST_DIR}")
-                sys.exit(1)
-        else:
-            print(f"Directory not found: {TEST_DIR}")
-            sys.exit(1)
+        # Select random image from LineMOD
+        obj_id = np.random.choice(OBJECTS)
+        rgb_dir = os.path.join(DATA_ROOT, obj_id, "rgb")
+        files = [f for f in os.listdir(rgb_dir) if f.endswith('.png')]
+        frame = np.random.choice(files).replace('.png', '')
+        TEST_IMG = os.path.join(rgb_dir, f"{frame}.png")
+        print(f"Selected: Object {obj_id}, Frame {frame}")
     
     run_inference(TEST_IMG)

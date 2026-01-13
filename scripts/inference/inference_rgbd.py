@@ -27,7 +27,7 @@ YOLO_PATH = os.path.join(PROJECT_ROOT, "runs", "segment", "linemod_yolo_seg", "w
 WEIGHTS_PATH = os.path.join(PROJECT_ROOT, "weights_rgbd", "best_pose_model.pth")
 MESH_DIR = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "models")
 DATA_ROOT = os.path.join(PROJECT_ROOT, "datasets", "Linemod_preprocessed", "data")
-TEST_DIR = os.path.join(PROJECT_ROOT, "datasets", "yolo_ready", "images", "test")
+OBJECTS = ['01', '02', '04', '05', '06', '08', '09', '10', '11', '12', '13', '14', '15']
 
 CLASS_ID_TO_OBJ_NAME = {
     0: "01", 1: "02", 2: "04", 3: "05", 4: "06", 5: "08",
@@ -249,7 +249,7 @@ def run_inference(img_path, depth_path=None):
             # Draw predicted 3D box (cyan, thick)
             box_2d = project_points(corners, pred_quat, pred_trans, K)
             draw_3d_box(viz_img, box_2d, (0, 255, 255), 2)
-            # draw_axes(viz_img, pred_quat, pred_trans, K, scale=0.1)
+            draw_axes(viz_img, pred_quat, pred_trans, K, scale=0.1)
             
             # Draw ground truth 3D box (green, thin)
             if gt_rot is not None and gt_trans is not None:
@@ -258,30 +258,30 @@ def run_inference(img_path, depth_path=None):
                 draw_3d_box(viz_img, gt_box_2d, (0, 255, 0), 1)  # Green, thin lines
             
             # Display label with ADD metric if available
-            # if metrics is not None:
-            #     add_mm = metrics['add_mm']
-            #     label = f"{obj_id_str} ADD:{add_mm:.0f}mm T:{metrics['trans_error_mm']:.0f}mm R:{metrics['rot_error_deg']:.0f}deg"
-            #     # Color based on accuracy: green if < 20mm, yellow if < 50mm, red otherwise
-            #     if add_mm < 20:
-            #         color = (0, 255, 0)  # Green - excellent
-            #     elif add_mm < 50:
-            #         color = (0, 255, 255)  # Yellow - good
-            #     else:
-            #         color = (0, 0, 255)  # Red - poor
-            # else:
-            #     label = f"{obj_id_str} ({conf:.2f})"
-            #     color = (0, 255, 255)
+            if metrics is not None:
+                add_mm = metrics['add_mm']
+                label = f"{obj_id_str} ADD:{add_mm:.0f}mm T:{metrics['trans_error_mm']:.0f}mm R:{metrics['rot_error_deg']:.0f}deg"
+                # Color based on accuracy: green if < 20mm, yellow if < 50mm, red otherwise
+                if add_mm < 20:
+                    color = (0, 255, 0)  # Green - excellent
+                elif add_mm < 50:
+                    color = (0, 255, 255)  # Yellow - good
+                else:
+                    color = (0, 0, 255)  # Red - poor
+            else:
+                label = f"{obj_id_str} ({conf:.2f})"
+                color = (0, 255, 255)
             
-            # # Draw label for this detection
-            # draw_label_with_bg(viz_img, label, x1, max(25, y1 - 10), color, scale=0.55, thickness=1)
+            # Draw label for this detection
+            draw_label_with_bg(viz_img, label, x1, max(25, y1 - 10), color, scale=0.55, thickness=1)
     
-    # # Add legend (outside the detection loop)
-    # put_text_with_outline(viz_img, "Cyan=Predicted | Green=GroundTruth", 
-    #                       (10, h_img - 70), (255, 255, 255), scale=0.6, thickness=2)
-    # put_text_with_outline(viz_img, "Axes: X=Red(Front) | Y=Green(Left) | Z=Blue(Top)", 
-    #                       (10, h_img - 45), (255, 255, 255), scale=0.6, thickness=2)
-    # put_text_with_outline(viz_img, "ADD: Green - Excellent | Yellow - Good | Red - Poor", 
-    #                       (10, h_img - 20), (0, 255, 255), scale=0.6, thickness=2)
+    # Add legend (outside the detection loop)
+    put_text_with_outline(viz_img, "Cyan=Predicted | Green=GroundTruth", 
+                          (10, h_img - 70), (255, 255, 255), scale=0.6, thickness=2)
+    put_text_with_outline(viz_img, "Axes: X=Red(Front) | Y=Green(Left) | Z=Blue(Top)", 
+                          (10, h_img - 45), (255, 255, 255), scale=0.6, thickness=2)
+    put_text_with_outline(viz_img, "ADD: Green - Excellent | Yellow - Good | Red - Poor", 
+                          (10, h_img - 20), (0, 255, 255), scale=0.6, thickness=2)
     
     plt.figure(figsize=(12, 10))
     plt.imshow(cv2.cvtColor(viz_img, cv2.COLOR_BGR2RGB))
@@ -295,18 +295,13 @@ if __name__ == "__main__":
         TEST_IMG = sys.argv[1]
         TEST_DEPTH = sys.argv[2] if len(sys.argv) > 2 else None
     else:
-        if os.path.exists(TEST_DIR):
-            files = [f for f in os.listdir(TEST_DIR) if f.endswith('.png') or f.endswith('.jpg')]
-            if len(files) > 0:
-                random_file = np.random.choice(files)
-                TEST_IMG = os.path.join(TEST_DIR, random_file)
-                TEST_DEPTH = None
-                print(f"Selected: {random_file}")
-            else:
-                print(f"No images found in {TEST_DIR}")
-                sys.exit(1)
-        else:
-            print(f"Directory not found: {TEST_DIR}")
-            sys.exit(1)
+        # Select random image from LineMOD
+        obj_id = np.random.choice(OBJECTS)
+        rgb_dir = os.path.join(DATA_ROOT, obj_id, "rgb")
+        files = [f for f in os.listdir(rgb_dir) if f.endswith('.png')]
+        frame = np.random.choice(files).replace('.png', '')
+        TEST_IMG = os.path.join(rgb_dir, f"{frame}.png")
+        TEST_DEPTH = os.path.join(DATA_ROOT, obj_id, "depth", f"{frame}.png")
+        print(f"Selected: Object {obj_id}, Frame {frame}")
     
     run_inference(TEST_IMG, TEST_DEPTH)

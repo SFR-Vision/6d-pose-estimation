@@ -124,18 +124,35 @@ def compute_add(pred_quat, pred_trans, gt_rot, gt_trans, model_points):
 
 
 def parse_image_filename(img_path):
-    """Parse object ID and frame ID from test image filename.
+    """Parse object ID and frame ID from image path.
     
-    Args:
-        img_path: Path to image file (e.g., '01_0219.png')
+    Handles both formats:
+        - LineMOD path: 'data/01/rgb/0219.png' -> ('01', 219)
+        - Legacy format: '01_0219.png' -> ('01', 219)
     
     Returns:
         tuple: (obj_id_str, frame_id) or (None, None)
     """
+    # Try LineMOD directory format first: data/{obj_id}/rgb/{frame}.png
+    parts = img_path.replace('\\', '/').split('/')
+    if 'rgb' in parts or 'depth' in parts:
+        try:
+            # Find obj_id (folder before 'rgb' or 'depth')
+            for i, p in enumerate(parts):
+                if p in ['rgb', 'depth'] and i > 0:
+                    obj_id_str = parts[i - 1]
+                    filename = os.path.basename(img_path)
+                    frame_id = int(filename.replace('.png', '').replace('.jpg', ''))
+                    return obj_id_str, frame_id
+        except:
+            pass
+    
+    # Fallback: legacy format '01_0219.png'
     filename = os.path.basename(img_path)
     parts = filename.replace('.png', '').replace('.jpg', '').split('_')
     if len(parts) >= 2:
         obj_id_str = parts[0]
         frame_id = int(parts[1])
         return obj_id_str, frame_id
+    
     return None, None

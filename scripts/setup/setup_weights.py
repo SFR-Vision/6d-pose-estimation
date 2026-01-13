@@ -9,12 +9,12 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..
 sys.path.insert(0, PROJECT_ROOT)
 os.chdir(PROJECT_ROOT)
 
-WEIGHTS_FILE_ID = '19bKLEmZx1rEEJONf0igz4O4FJaBQk-Hi'
+WEIGHTS_FILE_ID = '1_MNerec2G6R1fXYN8z2JQE6xg96pMxGN'
 
 REQUIRED_WEIGHTS = [
     "weights_rgb/best_pose_model.pth",
     "weights_rgbd/best_pose_model.pth",
-    "yolov8n-seg.pt",
+    "runs/segment/linemod_yolo_seg/weights/best.pt",
 ]
 
 
@@ -51,6 +51,7 @@ def download_weights():
     print("Extracting...")
     os.makedirs("weights_rgb", exist_ok=True)
     os.makedirs("weights_rgbd", exist_ok=True)
+    os.makedirs("runs/segment/linemod_yolo_seg/weights", exist_ok=True)
     
     with zipfile.ZipFile(zip_path, 'r') as zf:
         zf.extractall(".")
