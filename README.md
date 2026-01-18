@@ -92,7 +92,6 @@ Pose6D/
 ├── datasets/Linemod_preprocessed/  # LineMOD dataset
 ├── report/                         # CVPR-style LaTeX report
 ├── colab_notebook.ipynb            # Google Colab demo
-└── results_viewer.ipynb            # Local results visualization
 ```
 
 ## Installation
