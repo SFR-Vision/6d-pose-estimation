@@ -93,7 +93,7 @@ Pose6D/
 
 ```bash
 # Clone repository
-git clone https://github.com/SFR-Vision/6d-pose-estimation.git
+git clone https://github.com/LegenDaVinci/6d-pose-estimation.git
 cd 6d-pose-estimation
 
 # Create conda environment
@@ -147,7 +147,7 @@ python scripts/visualization/per_object_metrics.py
   author={Rakhmatullaev Ulugbek},
   year={2026},
   howpublished={GitHub Repository},
-  url={https://github.com/SFR-Vision/6d-pose-estimation}
+  url={https://github.com/LegenDaVinci/6d-pose-estimation}
 }
 ```
 
