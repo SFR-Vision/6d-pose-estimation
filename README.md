@@ -6,11 +6,6 @@ Deep learning-based 6D object pose estimation on the LineMOD dataset, comparing 
 
 ![RGBD Model Demo](demo_videos/gifs/RGBD_preview.gif)
 
-## Team Members
- **Ulugbek Rakhmatullaev**,
- **Karim Abdelgelil Mohamed Shalaby**,
- **Mohammad Fakih** 
-
 ## Model Architectures
 
 ### RGB Model (4-channel input)
@@ -149,7 +144,7 @@ python scripts/visualization/per_object_metrics.py
 ```bibtex
 @misc{pose6d2026,
   title={6D Pose Estimation with RGB and RGB-D Models},
-  author={Rakhmatullaev Ulugbek, Shalaby Karim, Fakih Mohammad},
+  author={Rakhmatullaev Ulugbek},
   year={2026},
   howpublished={GitHub Repository},
   url={https://github.com/SFR-Vision/6d-pose-estimation}
